@@ -19,7 +19,8 @@ const fr: Record<string, string> = {
   young: 'jeune',
   'middle aged': 'âge moyen',
   'middle-aged': 'âge moyen',
-  old: 'âgée',
+  middle_aged: 'âge moyen',
+  old: 'senior',
   french: 'accent français',
   american: 'accent américain',
   british: 'accent britannique'
