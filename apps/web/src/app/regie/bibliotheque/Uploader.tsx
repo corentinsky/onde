@@ -48,6 +48,13 @@ export function Uploader({ playlists }: { playlists: { id: string; label: string
     setItems((list) => [...list, ...audio.map((f) => ({ name: f.name, status: 'waiting' as const }))]);
     setBusy(true);
     const ctx = new AudioContext();
+    // Les titres déposés s’ajoutent à la fin de la liste choisie, dans l’ordre du dépôt.
+    const list = target;
+    let pos = 1;
+    if (list && browserConfigured) {
+      const { data: last } = await browserClient().from('playlist_tracks').select('position').eq('playlist_id', list).order('position', { ascending: false }).limit(1).maybeSingle();
+      pos = (last?.position ?? 0) + 1;
+    }
     for (let k = 0; k < audio.length; k++) {
       const file = audio[k];
       const i = start + k;
@@ -117,7 +124,13 @@ export function Uploader({ playlists }: { playlists: { id: string; label: string
           await sb.storage.from('music').remove([path]);
           throw new Error(error.message);
         }
-        if (target) await sb.from('playlist_tracks').insert({ playlist_id: target, track_id: row.id, position: Date.now() % 2147483647 });
+        if (list) {
+          const { error: listError } = await sb.from('playlist_tracks').insert({ playlist_id: list, track_id: row.id, position: pos++ });
+          if (listError) {
+            update(i, { status: 'done', message: `Dans la bibliothèque, mais pas dans la liste : ${listError.message}` });
+            continue;
+          }
+        }
         update(i, { status: 'done' });
       } catch (e) {
         update(i, { status: 'error', message: (e as Error).message });

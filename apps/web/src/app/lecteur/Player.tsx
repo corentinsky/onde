@@ -99,6 +99,7 @@ export function Player({ demo }: { demo: boolean }) {
   const [next, setNext] = useState<{ at: number; titles: string[] } | null>(null);
   const [emergency, setEmergency] = useState<Emergency | null>(null);
   const [clock, setClock] = useState(Date.now());
+  const [soundBlocked, setSoundBlocked] = useState(false);
 
   const music = useRef<HTMLAudioElement | null>(null);
   const engine = useRef<MusicEngine | null>(null);
@@ -365,7 +366,8 @@ export function Player({ demo }: { demo: boolean }) {
           const d = decideNow(0);
           if (d?.play.length) await playBreak(d.play);
         },
-        isBusy: () => busy.current
+        isBusy: () => busy.current,
+        onBlocked: setSoundBlocked
       });
       e.setSchedule(s.music!, s.store?.timezone ?? null);
       e.setBaseVolume(baseVolume());
@@ -387,6 +389,23 @@ export function Player({ demo }: { demo: boolean }) {
   }, [schedule, started, demo, startEngine]);
 
   useEffect(() => () => engine.current?.stop(), []);
+
+  // Flux externe (sans bibliothèque) : le lancer s’il arrive après le démarrage, ou s’il change.
+  useEffect(() => {
+    const a = music.current;
+    const url = schedule?.stream?.url;
+    if (!started || demo || engine.current || hasMusic(schedule) || !a || !url) return;
+    if (a.src.split('?')[0] === url.split('?')[0] && !a.paused) return;
+    a.src = url;
+    a.volume = baseVolume();
+    a.play().catch(() => setSoundBlocked(true));
+  }, [schedule, started, demo]);
+
+  const unblock = async () => {
+    setSoundBlocked(false);
+    if (engine.current) await engine.current.resume();
+    else await music.current?.play().catch(() => setSoundBlocked(true));
+  };
 
   // ───── Urgence : passe tout de suite, une fois ─────
   useEffect(() => {
@@ -422,8 +441,9 @@ export function Player({ demo }: { demo: boolean }) {
       if (!d) return;
       setNext(d.next ? { at: d.next.at, titles: d.next.items.map((i) => i.request.title) } : null);
       if (!d.play.length) return;
-      // Musique jouée par le lecteur : l’écran entre deux titres est lancé par le moteur, au point de sortie.
-      if (e && d.kind === 'between_tracks' && e.state !== 'idle') return;
+      // Musique jouée par le lecteur : l’écran entre deux titres est lancé par le moteur, au point de sortie,
+      // sauf si la régie autorise à couper un titre.
+      if (e && d.kind === 'between_tracks' && e.state !== 'idle' && toRules(scheduleRef.current.rules).neverCutTrack) return;
       playBreak(d.play);
     }, 1000);
     return () => clearInterval(id);
@@ -457,7 +477,7 @@ export function Player({ demo }: { demo: boolean }) {
       if (a && schedule?.stream?.url) {
         a.src = schedule.stream.url;
         a.volume = baseVolume();
-        await a.play().catch(() => undefined);
+        await a.play().catch(() => setSoundBlocked(true));
       }
     }
     setStarted(true);
@@ -512,6 +532,9 @@ export function Player({ demo }: { demo: boolean }) {
         </div>
       </header>
 
+      {started && soundBlocked && (
+        <button className="lp-btn lp-unblock" onClick={unblock}>Le navigateur a coupé le son : toucher pour relancer</button>
+      )}
       {!started ? (
         <div className="lp-center lp-grow">
           <button className="lp-btn lp-start" onClick={start}>Démarrer la diffusion</button>

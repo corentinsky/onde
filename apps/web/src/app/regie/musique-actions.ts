@@ -45,7 +45,8 @@ export async function updateTrack(form: FormData) {
       cross_start: Math.round(crossStart * 100) / 100,
       fade_in: clamp(numOr(form, 'fade_in', 0.1)!, 0, 15),
       fade_out: clamp(numOr(form, 'fade_out', cueOut - crossStart)!, 0, 30),
-      manual_cues: str(form, 'manual') !== 'false',
+      // « keep » : seules les étiquettes ont changé, on ne marque pas les points comme manuels.
+      ...(['true', 'false'].includes(str(form, 'manual')) ? { manual_cues: str(form, 'manual') === 'true' } : {}),
       enabled: form.get('enabled') === 'on'
     })
     .eq('id', id);

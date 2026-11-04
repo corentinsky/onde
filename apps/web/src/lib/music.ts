@@ -1,4 +1,5 @@
 import 'server-only';
+import { allRows, chunks, inChunks } from './batch';
 import { isConfigured, supabaseServer } from './supabase/server';
 
 export interface Track {
@@ -78,14 +79,47 @@ const num = <T extends object>(r: T): T => {
   return o as T;
 };
 
-export async function listTracks(search = ''): Promise<Track[]> {
-  if (!isConfigured) return [];
+/** Texte de recherche sûr pour un filtre « or » de PostgREST (valeur entre guillemets). */
+const searchValue = (q: string) => q.replace(/["\\%*]/g, '').trim().slice(0, 100);
+
+export const PAGE_SIZE = 200;
+
+/** Une page de la bibliothèque (recherche titre, artiste, album ; « à vérifier »). */
+export async function listTracks(opts: { q?: string; warningsOnly?: boolean; page?: number; size?: number } = {}): Promise<{ rows: Track[]; total: number }> {
+  if (!isConfigured) return { rows: [], total: 0 };
+  const size = opts.size ?? PAGE_SIZE;
+  const page = Math.max(0, opts.page ?? 0);
   const sb = await supabaseServer();
-  let q = sb.from('tracks').select(TRACK_COLS).order('artist').order('title').limit(500);
-  if (search) q = q.or(`title.ilike.%${search.replace(/[%,]/g, '')}%,artist.ilike.%${search.replace(/[%,]/g, '')}%`);
-  const { data, error } = await q;
+  let q = sb.from('tracks').select(TRACK_COLS, { count: 'exact' }).order('artist').order('title').order('id');
+  const s = searchValue(opts.q ?? '');
+  if (s) q = q.or(`title.ilike."%${s}%",artist.ilike."%${s}%",album.ilike."%${s}%"`);
+  if (opts.warningsOnly) q = q.neq('warnings', '{}');
+  const { data, error, count } = await q.range(page * size, page * size + size - 1);
   if (error) throw error;
-  return (data ?? []).map((t) => num({ ...t, waveform: [] })) as Track[];
+  return { rows: (data ?? []).map((t) => num({ ...t, waveform: [] })) as Track[], total: count ?? 0 };
+}
+
+/** Titres par identifiants, dans l’ordre demandé (listes de lecture). */
+export async function getTracksByIds(ids: string[]): Promise<Track[]> {
+  if (!isConfigured || !ids.length) return [];
+  const sb = await supabaseServer();
+  const rows = await inChunks([...new Set(ids)], (c) => sb.from('tracks').select(TRACK_COLS).in('id', c));
+  const byId = new Map(rows.map((t) => [t.id as string, num({ ...t, waveform: [] }) as Track]));
+  return ids.map((id) => byId.get(id)).filter((t): t is Track => !!t);
+}
+
+/** Chiffres de toute la bibliothèque, quelle que soit la page affichée. */
+export async function libraryStats(): Promise<{ count: number; usefulSec: number; toCheck: number }> {
+  if (!isConfigured) return { count: 0, usefulSec: 0, toCheck: 0 };
+  const sb = await supabaseServer();
+  const rows = await allRows<{ cue_in: number; cue_out: number; warnings: string[] }>((from, to) =>
+    sb.from('tracks').select('cue_in,cue_out,warnings').order('id').range(from, to)
+  );
+  return {
+    count: rows.length,
+    usefulSec: rows.reduce((a, r) => a + Number(r.cue_out) - Number(r.cue_in), 0),
+    toCheck: rows.filter((r) => r.warnings?.length).length
+  };
 }
 
 export async function getTrack(id: string): Promise<{ track: Track; url: string | null } | null> {
@@ -113,14 +147,25 @@ export async function listAmbiences(orgId: string): Promise<Ambience[]> {
 export async function listPlaylists(orgId: string): Promise<PlaylistRow[]> {
   if (!isConfigured) return [];
   const sb = await supabaseServer();
-  const { data, error } = await sb.from('playlists').select('*, playlist_tracks(track_id, position)').eq('org_id', orgId).order('name');
+  const { data, error } = await sb.from('playlists').select('*').eq('org_id', orgId).order('name');
   if (error) throw error;
-  return (data ?? []).map((p) => {
-    const items = ((p.playlist_tracks ?? []) as { track_id: string; position: number }[]).sort((a, b) => a.position - b.position);
-    const { playlist_tracks: _omit, ...rest } = p as Record<string, unknown>;
-    void _omit;
-    return { ...rest, track_ids: items.map((i) => i.track_id) } as PlaylistRow;
-  });
+  // Titres des listes, page par page : une liste peut dépasser le plafond de 1 000 lignes.
+  const items = (
+    await Promise.all(
+      chunks((data ?? []).map((p) => p.id as string), 50).map((ids) =>
+        allRows<{ playlist_id: string; track_id: string }>((from, to) =>
+          sb.from('playlist_tracks').select('playlist_id, track_id').in('playlist_id', ids).order('playlist_id').order('position').order('track_id').range(from, to)
+        )
+      )
+    )
+  ).flat();
+  const byList = new Map<string, string[]>();
+  for (const it of items) {
+    const l = byList.get(it.playlist_id);
+    if (l) l.push(it.track_id);
+    else byList.set(it.playlist_id, [it.track_id]);
+  }
+  return (data ?? []).map((p) => ({ ...p, track_ids: byList.get(p.id as string) ?? [] }) as PlaylistRow);
 }
 
 export async function listDayparts(orgId: string): Promise<DaypartRow[]> {

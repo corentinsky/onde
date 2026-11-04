@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { previewQueue, seededRng, type Playlist } from '@onde/rules';
 import { getSession } from '@/lib/data';
-import { DAYS, listAmbiences, listPlaylists, listTracks, mmss, orderLabel, toMin, typeLabel, type PlaylistRow } from '@/lib/music';
+import { DAYS, getTracksByIds, listAmbiences, listPlaylists, listTracks, mmss, orderLabel, toMin, typeLabel, type PlaylistRow } from '@/lib/music';
 import { addToPlaylist, deletePlaylist, removeFromPlaylist, savePlaylist } from '../../../musique-actions';
 
 export const metadata = { title: 'Liste de lecture' };
@@ -28,18 +28,21 @@ export default async function PlaylistPage({ params, searchParams }: { params: P
   const { q = '', enregistre } = await searchParams;
   const { org } = await getSession();
   if (!org) return null;
-  const [playlists, ambiences, library] = await Promise.all([listPlaylists(org.id), listAmbiences(org.id), listTracks(q)]);
+  const [playlists, ambiences, library] = await Promise.all([listPlaylists(org.id), listAmbiences(org.id), listTracks({ q, size: 200 })]);
   const p = playlists.find((x) => x.id === id);
   if (!p) notFound();
   const amb = ambiences.find((a) => a.id === p.ambience_id);
-  const all = q ? await listTracks() : library;
-  const byId = new Map(all.map((t) => [t.id, t]));
-  const inList = p.track_ids.map((tid) => byId.get(tid)).filter(Boolean) as typeof all;
-  const candidates = library.filter((t) => !p.track_ids.includes(t.id));
+  // Tous les titres des listes de l’ambiance, quelle que soit la taille de la bibliothèque.
+  const sameAmbRows = playlists.filter((x) => x.ambience_id === p.ambience_id);
+  const ambTracks = await getTracksByIds([...new Set(sameAmbRows.flatMap((x) => x.track_ids))]);
+  const byId = new Map(ambTracks.map((t) => [t.id, t]));
+  const inList = p.track_ids.map((tid) => byId.get(tid)).filter((t): t is (typeof ambTracks)[number] => !!t);
+  const inSet = new Set(p.track_ids);
+  const candidates = library.rows.filter((t) => !inSet.has(t.id));
 
   // Aperçu : les 12 prochains titres de l’ambiance, avec toutes ses listes, à partir de maintenant.
-  const sameAmb = playlists.filter((x) => x.ambience_id === p.ambience_id).map(toEngine);
-  const tracks = new Map(all.filter((t) => t.enabled).map((t) => [t.id, { id: t.id, title: t.title, artist: t.artist }]));
+  const sameAmb = sameAmbRows.map(toEngine);
+  const tracks = new Map(ambTracks.filter((t) => t.enabled).map((t) => [t.id, { id: t.id, title: t.title, artist: t.artist }]));
   const preview = previewQueue({
     playlists: sameAmb,
     tracks,
@@ -168,6 +171,7 @@ export default async function PlaylistPage({ params, searchParams }: { params: P
           <input type="hidden" name="playlist_id" value={p.id} />
           <div className="list" style={{ maxHeight: 420, overflowY: 'auto' }}>
             {candidates.length === 0 && <div className="empty">Rien à ajouter{q ? ' pour cette recherche' : ''}.</div>}
+            {library.total > library.rows.length && <div className="small muted" style={{ padding: '8px 0' }}>{library.rows.length} premiers titres sur {library.total} : affinez la recherche.</div>}
             {candidates.map((t) => (
               <label key={t.id} className="list-item" style={{ padding: '9px 0', cursor: 'pointer', justifyContent: 'flex-start', gap: 12 }}>
                 <input type="checkbox" name="track_id" value={t.id} />

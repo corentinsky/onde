@@ -1,4 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
+import { localTimeIn } from '@onde/rules';
+import { allRows, chunks, inChunks } from '@/lib/batch';
 import { authDevice, storeStream } from '@/lib/device';
 import { supabaseService } from '@/lib/supabase/server';
 
@@ -9,7 +11,6 @@ export async function GET(req: NextRequest) {
   const ctx = await authDevice(req);
   if (ctx instanceof NextResponse) return ctx;
   const sb = supabaseService();
-  const today = new Date().toISOString().slice(0, 10);
 
   const [{ data: rules }, { data: org }, { data: store }, { data: targets }, { data: zones }] = await Promise.all([
     sb.from('broadcast_rules').select('*').eq('org_id', ctx.orgId).single(),
@@ -23,6 +24,8 @@ export async function GET(req: NextRequest) {
     sb.from('zones').select('id, name, volume, messages_enabled, jingles_enabled, ambiences(name, stream_url)').eq('store_id', ctx.storeId)
   ]);
 
+  // Le jour de la boutique (fuseau de la boutique), pas celui du serveur en UTC.
+  const today = localTimeIn(new Date(), (store?.timezone as string | null) ?? 'Europe/Paris').date;
   type S = { id: string; origin: string; starts_on: string | null; ends_on: string | null; audio_path: string | null };
   const seen = new Set<string>();
   const spots = (targets ?? [])
@@ -59,13 +62,30 @@ async function musicFor(sb: ReturnType<typeof supabaseService>, orgId: string, s
   const [{ data: ambiences }, { data: dayparts }, { data: playlists }, { data: zone }] = await Promise.all([
     sb.from('ambiences').select('id, name, crossfade_mode, crossfade_sec, target_lufs, title_separation_min, artist_separation_min').eq('org_id', orgId).order('name'),
     sb.from('dayparts').select('id, name, ambience_id, start_time, end_time, days, position').eq('org_id', orgId).order('position').order('start_time'),
-    sb.from('playlists').select('*, playlist_tracks(track_id, position)').eq('org_id', orgId).eq('enabled', true),
+    sb.from('playlists').select('*').eq('org_id', orgId).eq('enabled', true),
     sb.from('zones').select('ambience_id').eq('store_id', storeId).not('ambience_id', 'is', null).limit(1).maybeSingle()
   ]);
   if (!ambiences?.length) return null;
 
+  // Titres des listes, page par page : une liste peut contenir des milliers de titres.
+  const listIds = (playlists ?? []).map((p) => p.id as string);
+  const items = (
+    await Promise.all(
+      chunks(listIds, 50).map((ids) =>
+        allRows<{ playlist_id: string; track_id: string; position: number }>((from, to) =>
+          sb.from('playlist_tracks').select('playlist_id, track_id, position').in('playlist_id', ids).order('playlist_id').order('position').order('track_id').range(from, to)
+        )
+      )
+    )
+  ).flat();
+  const byList = new Map<string, string[]>();
+  for (const it of items) {
+    const l = byList.get(it.playlist_id);
+    if (l) l.push(it.track_id);
+    else byList.set(it.playlist_id, [it.track_id]);
+  }
+
   const lists = (playlists ?? []).map((p) => {
-    const items = ((p.playlist_tracks ?? []) as { track_id: string; position: number }[]).sort((a, b) => a.position - b.position);
     return {
       id: p.id as string,
       ambienceId: p.ambience_id as string,
@@ -80,23 +100,23 @@ async function musicFor(sb: ReturnType<typeof supabaseService>, orgId: string, s
       avoidDuplicates: p.avoid_duplicates as boolean,
       isJingle: p.is_jingle as boolean,
       enabled: true,
-      trackIds: items.map((i) => i.track_id)
+      trackIds: byList.get(p.id as string) ?? []
     };
   });
 
   const ids = [...new Set(lists.flatMap((l) => l.trackIds))];
-  const { data: rows } = ids.length
-    ? await sb
-        .from('tracks')
-        .select('id, storage_path, title, artist, isrc, duration_sec, cue_in, cue_out, cross_start, fade_in, fade_out, integrated_lufs, peak_dbfs')
-        .in('id', ids)
-        .eq('enabled', true)
-    : { data: [] as never[] };
-  const paths = (rows ?? []).map((r) => r.storage_path as string);
-  const { data: signed } = paths.length ? await sb.storage.from('music').createSignedUrls(paths, 60 * 60 * 24) : { data: [] };
-  const urlOf = new Map((signed ?? []).map((s) => [s.path, s.signedUrl]));
+  const rows = await inChunks(ids, (c) =>
+    sb
+      .from('tracks')
+      .select('id, storage_path, title, artist, isrc, duration_sec, cue_in, cue_out, cross_start, fade_in, fade_out, integrated_lufs, peak_dbfs')
+      .in('id', c)
+      .eq('enabled', true)
+  );
+  const paths = rows.map((r) => r.storage_path as string);
+  const signed = (await Promise.all(chunks(paths, 500).map((c) => sb.storage.from('music').createSignedUrls(c, 60 * 60 * 24)))).flatMap((r) => r.data ?? []);
+  const urlOf = new Map(signed.map((s) => [s.path, s.signedUrl]));
   const n = (v: unknown) => (v == null ? null : Number(v));
-  const tracks = (rows ?? []).map((r) => ({
+  const tracks = rows.map((r) => ({
     id: r.id,
     title: r.title,
     artist: r.artist,

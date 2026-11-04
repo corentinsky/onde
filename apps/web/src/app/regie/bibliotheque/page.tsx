@@ -1,29 +1,35 @@
 import Link from 'next/link';
 import { gainFor } from '@onde/audio';
 import { getSession } from '@/lib/data';
-import { listAmbiences, listPlaylists, listTracks, mmss, warningLabel } from '@/lib/music';
+import { PAGE_SIZE, libraryStats, listAmbiences, listPlaylists, listTracks, mmss, warningLabel } from '@/lib/music';
 import { isConfigured } from '@/lib/supabase/server';
 import { Uploader } from './Uploader';
 
 export const metadata = { title: 'Bibliothèque' };
 
-export default async function Bibliotheque({ searchParams }: { searchParams: Promise<{ q?: string; filtre?: string }> }) {
-  const { q = '', filtre } = await searchParams;
+export default async function Bibliotheque({ searchParams }: { searchParams: Promise<{ q?: string; filtre?: string; page?: string }> }) {
+  const { q = '', filtre, page: pageParam } = await searchParams;
   const { org } = await getSession();
   if (!org) return null;
-  const [tracks, ambiences, playlists] = await Promise.all([listTracks(q), listAmbiences(org.id), listPlaylists(org.id)]);
+  const page = Math.max(0, (Number(pageParam) || 1) - 1);
+  const [{ rows: shown, total }, stats, ambiences, playlists] = await Promise.all([
+    listTracks({ q, warningsOnly: filtre === 'verifier', page }),
+    libraryStats(),
+    listAmbiences(org.id),
+    listPlaylists(org.id)
+  ]);
+  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const link = (n: number) => `/regie/bibliotheque?${new URLSearchParams({ ...(q ? { q } : {}), ...(filtre ? { filtre } : {}), page: String(n) })}`;
   const ambName = new Map(ambiences.map((a) => [a.id, a.name]));
   const inPlaylists = new Map<string, string[]>();
   for (const p of playlists) for (const t of p.track_ids) inPlaylists.set(t, [...(inPlaylists.get(t) ?? []), `${ambName.get(p.ambience_id) ?? ''} · ${p.name}`]);
-  const toCheck = tracks.filter((t) => t.warnings.length > 0);
-  const shown = filtre === 'verifier' ? toCheck : tracks;
-  const totalMin = Math.round(tracks.reduce((a, t) => a + (t.cue_out - t.cue_in), 0) / 60);
+  const totalMin = Math.round(stats.usefulSec / 60);
 
   return (
     <>
       <div className="page-head">
         <div>
-          <div className="eyebrow">Commune à toutes les enseignes · {tracks.length} titres · {Math.floor(totalMin / 60)} h {String(totalMin % 60).padStart(2, '0')}</div>
+          <div className="eyebrow">Commune à toutes les enseignes · {stats.count} titres · {Math.floor(totalMin / 60)} h {String(totalMin % 60).padStart(2, '0')}</div>
           <h1>Bibliothèque</h1>
           <p className="lead">Déposez vos fichiers. Onde mesure le volume, repère le début et la fin de chaque titre et prépare les enchaînements. Vous ne corrigez que les exceptions.</p>
         </div>
@@ -37,11 +43,12 @@ export default async function Bibliotheque({ searchParams }: { searchParams: Pro
           <h2>Titres</h2>
           <div className="actions" style={{ alignItems: 'center' }}>
             <form>
+              {filtre && <input type="hidden" name="filtre" value={filtre} />}
               <input className="input" name="q" defaultValue={q} placeholder="Rechercher un titre ou un artiste" style={{ width: 260 }} aria-label="Rechercher" />
             </form>
             <div className="segmented" role="group" aria-label="Filtre">
-              <Link href="/regie/bibliotheque" aria-current={filtre !== 'verifier' ? 'true' : undefined}>Tous ({tracks.length})</Link>
-              <Link href="/regie/bibliotheque?filtre=verifier" aria-current={filtre === 'verifier' ? 'true' : undefined}>À vérifier ({toCheck.length})</Link>
+              <Link href="/regie/bibliotheque" aria-current={filtre !== 'verifier' ? 'true' : undefined}>Tous ({stats.count})</Link>
+              <Link href="/regie/bibliotheque?filtre=verifier" aria-current={filtre === 'verifier' ? 'true' : undefined}>À vérifier ({stats.toCheck})</Link>
             </div>
           </div>
         </div>
@@ -51,7 +58,7 @@ export default async function Bibliotheque({ searchParams }: { searchParams: Pro
               <tr><th>Titre</th><th>Durée utile</th><th>Volume</th><th>Gain</th><th>Points de mix</th><th>Listes</th><th>État</th></tr>
             </thead>
             <tbody>
-              {shown.length === 0 && <tr><td colSpan={7} className="empty">{q ? 'Aucun titre ne correspond.' : 'Aucun titre pour l’instant. Déposez vos premiers morceaux ci-dessus.'}</td></tr>}
+              {shown.length === 0 && <tr><td colSpan={7} className="empty">{q ? 'Aucun titre ne correspond.' : filtre === 'verifier' ? 'Rien à vérifier.' : 'Aucun titre pour l’instant. Déposez vos premiers morceaux ci-dessus.'}</td></tr>}
               {shown.map((t) => (
                 <tr key={t.id}>
                   <td>
@@ -75,6 +82,15 @@ export default async function Bibliotheque({ searchParams }: { searchParams: Pro
             </tbody>
           </table>
         </div>
+        {pages > 1 && (
+          <div className="actions" style={{ justifyContent: 'space-between', alignItems: 'center', marginTop: 16 }}>
+            <span className="small muted">{q ? `${total} résultats · ` : ''}Page {page + 1} sur {pages}</span>
+            <div className="actions">
+              {page > 0 && <Link className="btn btn-secondary btn-small" href={link(page)}>Précédents</Link>}
+              {page + 1 < pages && <Link className="btn btn-secondary btn-small" href={link(page + 2)}>Suivants</Link>}
+            </div>
+          </div>
+        )}
       </section>
     </>
   );

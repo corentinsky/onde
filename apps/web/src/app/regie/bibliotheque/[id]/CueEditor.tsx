@@ -26,7 +26,10 @@ export function CueEditor({ duration, waveform, initial, integratedLufs, peakDbf
   const [p, setP] = useState(initial);
   const [drag, setDrag] = useState<Marker | null>(null);
   const [status, setStatus] = useState('');
-  const [manual, setManual] = useState(true);
+  // « keep » : points inchangés, l’état manuel/automatique du titre reste tel quel.
+  const [manual, setManual] = useState<'keep' | 'true' | 'false'>('keep');
+  // Saisie en cours au clavier : appliquée à la sortie du champ, pas à chaque touche.
+  const [draft, setDraft] = useState<Record<string, string>>({});
   const svg = useRef<SVGSVGElement>(null);
   const ctx = useRef<AudioContext | null>(null);
   const buffer = useRef<AudioBuffer | null>(null);
@@ -40,7 +43,8 @@ export function CueEditor({ duration, waveform, initial, integratedLufs, peakDbf
     return Math.max(0, Math.min(duration, ((clientX - r.left) / r.width) * duration));
   };
 
-  const set = (m: Marker, t: number) =>
+  const set = (m: Marker, t: number) => {
+    setManual('true');
     setP((cur) => {
       const n = { ...cur, [m]: Math.round(t * 100) / 100 };
       if (m === 'cueIn') n.cueIn = Math.min(n.cueIn, n.crossStart - 0.1);
@@ -49,6 +53,22 @@ export function CueEditor({ duration, waveform, initial, integratedLufs, peakDbf
       n.fadeOut = Math.round(Math.max(0.1, n.cueOut - n.crossStart) * 100) / 100;
       return n;
     });
+  };
+  const commit = (name: string, k: keyof typeof initial) => {
+    const raw = draft[name];
+    setDraft(({ [name]: _gone, ...rest }) => rest);
+    if (raw == null) return;
+    const v = Number(raw.replace(',', '.'));
+    if (!Number.isFinite(v)) return;
+    if (k === 'fadeIn' || k === 'fadeOut') {
+      setManual('true');
+      setP((cur) => ({ ...cur, [k]: Math.max(0, Math.min(30, Math.round(v * 100) / 100)) }));
+    } else set(k, Math.max(0, Math.min(duration, v)));
+  };
+  /** Les erreurs d’écoute (fichier indisponible, format) s’affichent au lieu d’être silencieuses. */
+  const safe = (fn: () => Promise<void>) => () => {
+    fn().catch((e: Error) => setStatus(`Écoute impossible : ${e.message}`));
+  };
 
   useEffect(() => () => { ctx.current?.close(); }, []);
 
@@ -57,7 +77,9 @@ export function CueEditor({ duration, waveform, initial, integratedLufs, peakDbf
     if (!audioUrl) throw new Error('Fichier indisponible');
     setStatus('Chargement du fichier…');
     ctx.current ??= new AudioContext();
-    const data = await (await fetch(audioUrl)).arrayBuffer();
+    const res = await fetch(audioUrl);
+    if (!res.ok) throw new Error('fichier inaccessible, rechargez la page');
+    const data = await res.arrayBuffer();
     buffer.current = await ctx.current.decodeAudioData(data);
     setStatus('');
     return buffer.current;
@@ -120,7 +142,8 @@ export function CueEditor({ duration, waveform, initial, integratedLufs, peakDbf
     setStatus('Analyse…');
     const r = analyze(Array.from({ length: b.numberOfChannels }, (_, i) => b.getChannelData(i)), b.sampleRate);
     setP({ cueIn: r.cueIn, crossStart: r.crossStart, cueOut: r.cueOut, fadeIn: r.fadeIn, fadeOut: r.fadeOut });
-    setManual(false);
+    setDraft({});
+    setManual('false');
     setStatus('Points recalculés. Enregistrez pour les garder.');
   }
 
@@ -175,20 +198,21 @@ export function CueEditor({ duration, waveform, initial, integratedLufs, peakDbf
               min={0}
               max={duration}
               name={name}
-              value={p[k]}
-              onChange={(e) => (k === 'fadeIn' || k === 'fadeOut' ? setP({ ...p, [k]: Number(e.target.value) }) : set(k as Marker, Number(e.target.value)))}
+              value={draft[name] ?? String(p[k])}
+              onChange={(e) => setDraft((d) => ({ ...d, [name]: e.target.value }))}
+              onBlur={() => commit(name, k)}
             />
           </label>
         ))}
       </div>
-      <input type="hidden" name="manual" value={String(manual)} />
+      <input type="hidden" name="manual" value={manual} />
 
       <div className="actions" style={{ marginTop: 16 }}>
-        <button type="button" className="btn btn-dark btn-small" onClick={() => play(p.cueIn, Math.min(p.cueOut, p.cueIn + 12), p.fadeIn, null)} disabled={!audioUrl}>Écouter le début</button>
-        <button type="button" className="btn btn-dark btn-small" onClick={() => play(Math.max(p.cueIn, p.crossStart - 8), p.cueOut, 0, p.crossStart)} disabled={!audioUrl}>Écouter la fin</button>
-        <button type="button" className="btn btn-dark btn-small" onClick={transition} disabled={!audioUrl}>Écouter l’enchaînement</button>
+        <button type="button" className="btn btn-dark btn-small" onClick={safe(() => play(p.cueIn, Math.min(p.cueOut, p.cueIn + 12), p.fadeIn, null))} disabled={!audioUrl}>Écouter le début</button>
+        <button type="button" className="btn btn-dark btn-small" onClick={safe(() => play(Math.max(p.cueIn, p.crossStart - 8), p.cueOut, 0, p.crossStart))} disabled={!audioUrl}>Écouter la fin</button>
+        <button type="button" className="btn btn-dark btn-small" onClick={safe(transition)} disabled={!audioUrl}>Écouter l’enchaînement</button>
         <button type="button" className="btn btn-secondary btn-small" onClick={stop}>Arrêter</button>
-        <button type="button" className="btn btn-secondary btn-small" onClick={reanalyze} disabled={!audioUrl}>Réanalyser</button>
+        <button type="button" className="btn btn-secondary btn-small" onClick={safe(reanalyze)} disabled={!audioUrl}>Réanalyser</button>
         {status && <span className="small muted" style={{ alignSelf: 'center' }}>{status}</span>}
       </div>
       <p className="small muted" style={{ marginTop: 10 }}>

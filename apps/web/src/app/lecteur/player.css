@@ -39,3 +39,4 @@
 .lp-error { color: #ff6961 !important; }
 .lp-progress { margin-top: 28px; height: 4px; border-radius: 4px; background: #2c2c2e; overflow: hidden; max-width: 640px; }
 .lp-progress > div { height: 100%; background: #f5f5f7; border-radius: 4px; transition: width 1s linear; }
+.lp-unblock { position: fixed; left: 50%; bottom: 40px; transform: translateX(-50%); z-index: 10; background: #ff9f0a; color: #000; }

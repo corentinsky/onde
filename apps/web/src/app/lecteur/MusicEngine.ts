@@ -67,6 +67,9 @@ interface Deck {
   mixed: boolean;
   started: boolean;
   url: string;
+  /** Surveillance d’un titre bloqué (réseau, fichier abîmé). */
+  lastPos: number;
+  lastMove: number;
 }
 
 const CACHE = 'onde-music-v1';
@@ -75,6 +78,8 @@ const HISTORY = 'onde.music.history';
 const STATE = 'onde.music.state';
 /** Le titre suivant est choisi peu avant l’enchaînement, pour suivre l’heure au plus près. */
 const PREPARE_AHEAD_SEC = 15;
+/** Un titre dont la lecture n’avance plus depuis ce délai est abandonné au profit du suivant. */
+const STALL_MS = 8000;
 
 const load = <T,>(k: string, d: T): T => {
   try {
@@ -111,6 +116,9 @@ export class MusicEngine {
   /** Titre qui finit pendant qu’un écran de spots attend : reste affiché jusqu’au point de sortie. */
   private ending: Deck | null = null;
   private ticking = false;
+  private failures = 0;
+  /** Le navigateur refuse de lancer le son (il faut un geste sur l’écran). */
+  blocked = false;
 
   constructor(
     private hooks: {
@@ -121,6 +129,8 @@ export class MusicEngine {
       runBreak: () => Promise<void>;
       /** Une annonce occupe l’antenne : ne pas lancer de titre. */
       isBusy: () => boolean;
+      /** Le son est bloqué par le navigateur, ou débloqué. */
+      onBlocked?: (blocked: boolean) => void;
     }
   ) {
     this.master.connect(this.ctx.destination);
@@ -143,8 +153,16 @@ export class MusicEngine {
   }
 
   async start() {
-    await this.ctx.resume();
+    await this.ctx.resume().catch(() => undefined);
     this.timer ??= setInterval(() => void this.tick(), 100);
+  }
+
+  /** Après un geste sur l’écran : relance le son si le navigateur l’avait bloqué. */
+  async resume() {
+    await this.ctx.resume().catch(() => undefined);
+    this.setBlocked(false);
+    this.waitUntil = 0;
+    if (this.current?.el.paused && this.current.started) await this.current.el.play().catch(() => undefined);
   }
 
   stop() {
@@ -153,8 +171,22 @@ export class MusicEngine {
     this.dispose(this.current);
     for (const d of this.outgoing) this.dispose(d);
     this.outgoing.clear();
+    this.dropUpcoming();
     this.current = null;
     void this.ctx.close();
+  }
+
+  private setBlocked(v: boolean) {
+    if (this.blocked === v) return;
+    this.blocked = v;
+    this.hooks.onBlocked?.(v);
+  }
+
+  /** Abandonne le titre préparé d’avance et libère son lecteur. */
+  private dropUpcoming() {
+    const u = this.upcoming;
+    this.upcoming = null;
+    void u?.then((d) => d && d !== this.current && this.dispose(d)).catch(() => undefined);
   }
 
   /** Baisse (0 à 1) ou remonte toute la musique : spots synchronisés, urgence. */
@@ -288,6 +320,10 @@ export class MusicEngine {
     const gain = this.ctx.createGain();
     gain.gain.value = 0.0001;
     this.ctx.createMediaElementSource(el).connect(gain).connect(this.master);
+    const fail = (e: unknown) => {
+      this.dispose({ el, gain, url } as Deck);
+      throw e;
+    };
     const t = c.track;
     const gainDb = t.integrated_lufs == null ? 0 : gainFor(t.integrated_lufs, t.peak_dbfs ?? -1, c.amb.target_lufs);
     const mix = effectiveMix(
@@ -299,7 +335,8 @@ export class MusicEngine {
       if (el.readyState >= 1) return resolve();
       el.addEventListener('loadedmetadata', () => resolve(), { once: true });
       el.addEventListener('error', () => reject(new Error('Fichier illisible')), { once: true });
-    });
+      setTimeout(() => reject(new Error('Fichier trop long à charger')), 15000);
+    }).catch(fail);
     return {
       track: t,
       playlistId: c.playlist.id,
@@ -313,19 +350,34 @@ export class MusicEngine {
       mix,
       mixed: false,
       started: false,
-      url
+      url,
+      lastPos: -1,
+      lastMove: Date.now()
     };
   }
 
-  private async begin(d: Deck) {
+  private async begin(d: Deck): Promise<boolean> {
     d.el.currentTime = d.mix.cueIn;
     const now = this.ctx.currentTime;
     d.gain.gain.cancelScheduledValues(now);
     d.gain.gain.setValueAtTime(d.mix.fadeIn > 0 ? 0.0001 : d.level, now);
     if (d.mix.fadeIn > 0) d.gain.gain.linearRampToValueAtTime(d.level, now + d.mix.fadeIn);
-    await d.el.play();
+    try {
+      await d.el.play();
+    } catch (e) {
+      if ((e as DOMException)?.name === 'NotAllowedError') {
+        // Son bloqué par le navigateur : on garde ce titre pour le geste qui débloquera.
+        this.upcoming = Promise.resolve(d);
+        this.setBlocked(true);
+        return false;
+      }
+      this.dispose(d);
+      throw e;
+    }
     d.started = true;
+    d.lastMove = Date.now();
     this.current = d;
+    this.failures = 0;
     this.hooks.onTrackStart({
       track: d.track,
       playlistId: d.playlistId,
@@ -337,6 +389,7 @@ export class MusicEngine {
     const hist = load<PlayedTrack[]>(HISTORY, []);
     hist.push({ trackId: d.track.id, playlistId: d.playlistId, at: Date.now(), title: d.track.title, artist: d.track.artist, isJingle: d.isJingle });
     save(HISTORY, hist.slice(-300));
+    return true;
   }
 
   /** Fondu de sortie du point d’enchaînement jusqu’au point de sortie, puis libération. */
@@ -365,8 +418,18 @@ export class MusicEngine {
   }
 
   private async startNext(): Promise<boolean> {
-    const n = await (this.upcoming ?? this.prepare());
+    const ready = this.upcoming;
     this.upcoming = null;
+    let n = ready ? await ready : null;
+    // Pas de titre prêt, ou fichier illisible : on en choisit un autre tout de suite (3 essais).
+    for (let i = 0; !n && i < 3; i++) {
+      try {
+        n = await this.prepare();
+        if (!n) break; // rien de jouable
+      } catch {
+        /* fichier illisible : essai suivant */
+      }
+    }
     if (!n) {
       this.waitUntil = Date.now() + 5000; // rien de jouable : on réessaie dans 5 s
       return false;
@@ -375,20 +438,36 @@ export class MusicEngine {
       this.upcoming = Promise.resolve(n); // une annonce a pris l’antenne entre-temps
       return false;
     }
-    await this.begin(n);
-    return true;
+    return this.begin(n);
   }
 
   private async tick() {
-    if (this.ticking || this.holding || Date.now() < this.waitUntil) return;
+    if (this.ticking || this.holding || this.blocked || Date.now() < this.waitUntil) return;
     this.ticking = true;
     try {
+      // Contexte audio suspendu par le système (veille, changement de sortie) : on le relance.
+      if (this.ctx.state !== 'running') {
+        await this.ctx.resume().catch(() => undefined);
+        if ((this.ctx.state as AudioContextState) !== 'running') {
+          this.setBlocked(true);
+          return;
+        }
+      }
       const c = this.current;
       if (!c) {
         if (!this.hooks.isBusy()) await this.startNext();
         return;
       }
       const t = c.el.currentTime;
+      // Lecture interrompue par le système (casque, touches multimédia) : on relance.
+      if (c.el.paused && !c.el.ended) await c.el.play().catch(() => undefined);
+      // Titre bloqué (réseau, fichier abîmé) : on passe au suivant.
+      if (t !== c.lastPos) {
+        c.lastPos = t;
+        c.lastMove = Date.now();
+      } else if (Date.now() - c.lastMove > STALL_MS) {
+        throw new Error('Lecture bloquée');
+      }
       if (!this.upcoming && t >= Math.max(c.mix.cueIn + 1, c.mix.crossStart - PREPARE_AHEAD_SEC)) {
         this.upcoming = this.prepare().catch(() => null);
       }
@@ -413,7 +492,7 @@ export class MusicEngine {
         }
         this.release(c);
         this.current = null;
-        if (!(await this.startNext())) return;
+        await this.startNext();
         return;
       }
       // Fin de fichier atteinte avant le point prévu (fichier plus court, erreur) : on enchaîne.
@@ -422,13 +501,14 @@ export class MusicEngine {
         this.current = null;
       }
     } catch {
-      // Titre illisible : on passe au suivant après une courte pause.
+      // Titre illisible ou bloqué : on passe au suivant, en espaçant les essais si les échecs se répètent.
       this.dispose(this.current);
       this.current = null;
-      this.upcoming = null;
+      this.dropUpcoming();
       this.holding = false;
       this.ending = null;
-      this.waitUntil = Date.now() + 1000;
+      this.failures += 1;
+      this.waitUntil = Date.now() + Math.min(30_000, 1000 * 2 ** Math.min(this.failures - 1, 5));
     } finally {
       this.ticking = false;
     }
