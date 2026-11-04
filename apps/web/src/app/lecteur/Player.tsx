@@ -205,7 +205,8 @@ export function Player({ demo }: { demo: boolean }) {
       }
     };
     load();
-    const id = setInterval(load, 15_000);
+    // Flux Onde : les changements de titre arrivent dans le flux ; la liste des titres suffit toutes les minutes.
+    const id = setInterval(load, director.current ? 60_000 : 15_000);
     return () => clearInterval(id);
   }, [token, started, demo, api]);
 

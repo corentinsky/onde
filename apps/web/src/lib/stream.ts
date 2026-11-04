@@ -26,12 +26,13 @@ export interface StreamRow {
   rotation_state: RotationState | Record<string, never>;
 }
 
-/** Une enseigne = un flux. Crée les flux manquants et renvoie ceux à diffuser (enseignes avec au moins une ambiance). */
+/** Une enseigne = un flux. Crée les flux manquants et renvoie ceux à diffuser (enseignes qui ont de la musique programmée). */
 export async function ensureStreams(sb: SB): Promise<{ org_id: string; mount: string; name: string }[]> {
-  const [{ data: orgs, error: e1 }, { data: streams, error: e2 }, { data: ambs, error: e3 }] = await Promise.all([
+  const [{ data: orgs, error: e1 }, { data: streams, error: e2 }, { data: lists, error: e3 }] = await Promise.all([
     sb.from('organizations').select('id, name').order('name'),
     sb.from('streams').select('org_id, mount, enabled'),
-    sb.from('ambiences').select('org_id')
+    // Enseignes qui ont au moins une liste active avec des titres : les autres n’ont rien à diffuser.
+    sb.from('playlists').select('org_id, playlist_tracks!inner(track_id)').eq('enabled', true).limit(1, { foreignTable: 'playlist_tracks' })
   ]);
   if (e1 || e2 || e3) throw e1 ?? e2 ?? e3;
   const byOrg = new Map((streams ?? []).map((s) => [s.org_id as string, s]));
@@ -45,9 +46,9 @@ export async function ensureStreams(sb: SB): Promise<{ org_id: string; mount: st
     taken.add(mount);
     byOrg.set(o.id, data);
   }
-  const withAmb = new Set((ambs ?? []).map((a) => a.org_id as string));
+  const withMusic = new Set((lists ?? []).map((l) => l.org_id as string));
   return (orgs ?? [])
-    .filter((o) => withAmb.has(o.id) && byOrg.get(o.id)?.enabled)
+    .filter((o) => withMusic.has(o.id) && byOrg.get(o.id)?.enabled)
     .map((o) => ({ org_id: o.id as string, mount: byOrg.get(o.id)!.mount as string, name: o.name as string }));
 }
 

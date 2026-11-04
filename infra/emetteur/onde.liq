@@ -84,7 +84,8 @@ def stream(line) =
     end
   end
 
-  s = request.dynamic(id="titres_#{mount}", retry_delay=5., prefetch=1, next)
+  # Rien à jouer (liste vide, régie injoignable) : nouvel essai toutes les 20 s, sans surcharger la régie.
+  s = request.dynamic(id="titres_#{mount}", retry_delay=20., prefetch=1, next)
   # Volume de chaque titre (EBU R128, calculé à l’analyse) : métadonnée liq_amplify.
   s = amplify(override="liq_amplify", 1., s)
   # Enchaînement au point de chevauchement : liq_cross_duration, liq_fade_in, liq_fade_out.
