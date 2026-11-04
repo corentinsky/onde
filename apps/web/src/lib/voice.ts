@@ -70,10 +70,21 @@ export async function synthesize(text: string, voiceId: string): Promise<ArrayBu
   });
   if (!res.ok) {
     const detail = await res.text().catch(() => '');
-    if (/missing_permissions|text_to_speech/i.test(detail)) throw new Error('La clé ElevenLabs n’a pas le droit « Text to Speech » : activez-le sur la clé.');
-    if (res.status === 401) throw new Error('Clé ElevenLabs refusée');
-    if (res.status === 429 || /quota/i.test(detail)) throw new Error('Quota ElevenLabs atteint pour ce mois');
-    throw new Error(`ElevenLabs a répondu ${res.status}`);
+    let status = '';
+    let message = '';
+    try {
+      const d = (JSON.parse(detail) as { detail?: { status?: string; message?: string } | string }).detail;
+      status = typeof d === 'object' ? (d?.status ?? '') : '';
+      message = typeof d === 'object' ? (d?.message ?? '') : String(d ?? '');
+    } catch {
+      message = detail.slice(0, 200);
+    }
+    if (/missing_permissions/i.test(status + message)) throw new Error('La clé ElevenLabs n’a pas le droit « Text to Speech » : activez-le sur la clé.');
+    if (/paid_plan_required|library|subscription|upgrade/i.test(status + message))
+      throw new Error('Cette voix de la bibliothèque ElevenLabs n’est utilisable par l’API qu’avec un abonnement payant (Starter). Choisissez une voix de base, ou passez à l’offre Starter.');
+    if (res.status === 429 || /quota/i.test(status + message)) throw new Error('Quota ElevenLabs atteint pour ce mois.');
+    if (res.status === 401) throw new Error('Clé ElevenLabs refusée.');
+    throw new Error(`ElevenLabs a refusé la demande${message ? ` : ${message}` : ` (${res.status})`}`);
   }
   return res.arrayBuffer();
 }
