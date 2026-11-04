@@ -2,14 +2,14 @@
   "name": "onde",
   "private": true,
   "version": "0.1.0",
-  "description": "Onde — radios d’enseigne : régie, siège, magasin.",
+  "description": "Onde \u2014 radios d\u2019enseigne : r\u00e9gie, si\u00e8ge, magasin.",
   "workspaces": [
     "packages/*",
     "apps/*"
   ],
   "scripts": {
     "dev": "npm run dev -w @onde/web",
-    "build": "npm run build -w @onde/rules && npm run build -w @onde/web",
+    "build": "npm run build -w @onde/web",
     "test": "npm run test -w @onde/rules",
     "typecheck": "npm run typecheck -w @onde/rules && npm run typecheck -w @onde/web",
     "db:test": "node supabase/tests/run.mjs"
