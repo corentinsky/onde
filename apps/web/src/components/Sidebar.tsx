@@ -23,6 +23,14 @@ const groups: { title: string; items: { href: string; label: string; badge?: boo
     ]
   },
   {
+    title: 'Musique',
+    items: [
+      { href: '/regie/bibliotheque', label: 'Bibliothèque' },
+      { href: '/regie/ambiances', label: 'Ambiances et listes' },
+      { href: '/regie/programmation', label: 'Journée type' }
+    ]
+  },
+  {
     title: 'Réseau',
     items: [
       { href: '/regie/messages', label: 'Messages boutiques', badge: true },
