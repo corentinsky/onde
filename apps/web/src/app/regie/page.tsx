@@ -1,28 +1,38 @@
 import Link from 'next/link';
-import { azuracastConfigured, nowPlayingAll, type NowPlaying } from '@/lib/azuracast';
 import { getSession, listIncidents, listSpots, listStoreStatus } from '@/lib/data';
 import { ago, incidentLabel } from '@/lib/format';
+import { EMITTER_ONLINE_MS } from '@/lib/stream';
+import { isConfigured, supabaseService } from '@/lib/supabase/server';
 
 export const metadata = { title: 'Vue d’ensemble' };
 
-async function streams(): Promise<{ ok: true; list: NowPlaying[] } | { ok: false; reason: string }> {
-  if (!azuracastConfigured) return { ok: false, reason: 'AzuraCast n’est pas encore branché. Ajoutez AZURACAST_URL et AZURACAST_API_KEY.' };
-  try {
-    return { ok: true, list: await nowPlayingAll() };
-  } catch (e) {
-    return { ok: false, reason: `AzuraCast ne répond pas (${(e as Error).message}).` };
-  }
+/** Flux de l’enseigne : émetteur en service, titre en cours. */
+async function antenne(orgId: string) {
+  if (!isConfigured || !process.env.SUPABASE_SERVICE_ROLE_KEY) return { live: false, installed: false, current: null, next: null };
+  const sb = supabaseService();
+  const [{ data: emitters }, { data: stream }, { data: plays }] = await Promise.all([
+    sb.from('emitters').select('last_seen_at, public_url'),
+    sb.from('streams').select('enabled').eq('org_id', orgId).maybeSingle(),
+    sb.from('stream_plays').select('title, artist, started_at, queued_at').eq('org_id', orgId).order('queued_at', { ascending: false }).limit(3)
+  ]);
+  const live = (emitters ?? []).some((e) => e.last_seen_at && Date.now() - Date.parse(e.last_seen_at) < EMITTER_ONLINE_MS) && stream?.enabled !== false;
+  return {
+    live,
+    installed: (emitters ?? []).length > 0,
+    current: (plays ?? []).find((p) => p.started_at) ?? null,
+    next: (plays ?? []).find((p) => !p.started_at) ?? null
+  };
 }
 
 export default async function Overview() {
   const { org } = await getSession();
   if (!org) return null;
-  const [stores, incidents, pending, spots, az] = await Promise.all([
+  const [stores, incidents, pending, spots, air] = await Promise.all([
     listStoreStatus(org.id),
     listIncidents(org.id),
     listSpots(org.id, { pendingOnly: true }),
     listSpots(org.id),
-    streams()
+    antenne(org.id)
   ]);
   const online = stores.filter((s) => s.status === 'online').length;
   const active = spots.filter((s) => s.status === 'approved' && s.origin !== 'store').length;
@@ -45,24 +55,28 @@ export default async function Overview() {
       </div>
 
       <section className="card card-dark" aria-label="Flux à l’antenne">
-        <div className="sub">À l’antenne</div>
-        {az.ok ? (
-          <div className="list">
-            {az.list.map((s) => (
-              <div className="list-item" key={s.station.id} style={{ borderColor: '#3a3a3c' }}>
-                <div>
-                  <div style={{ fontWeight: 600 }}>{s.station.name}</div>
-                  <div className="small muted">
-                    {s.now_playing ? `${s.now_playing.song.title} · ${s.now_playing.song.artist}` : 'Silence'}
-                  </div>
+        <div className="page-head" style={{ alignItems: 'center' }}>
+          <div>
+            <div className="status sub">
+              <span className="dot" style={{ background: air.live ? 'var(--ok)' : 'var(--warn)' }} />
+              {air.live ? `Flux ${org.name} en direct` : air.installed ? 'Émetteur hors service' : 'Émetteur pas encore installé'}
+            </div>
+            {air.live && air.current ? (
+              <>
+                <div style={{ fontSize: 22, fontWeight: 600, letterSpacing: '-0.02em', marginTop: 6 }}>{air.current.title}</div>
+                <div className="small muted" style={{ marginTop: 4 }}>
+                  {air.current.artist}
+                  {air.next ? ` · ensuite : ${air.next.title}` : ''}
                 </div>
-                <div className="small muted">{s.listeners.current} boutiques à l’écoute</div>
+              </>
+            ) : (
+              <div className="small muted" style={{ marginTop: 6 }}>
+                {air.live ? 'Le premier titre arrive.' : `Les boutiques jouent la musique de la bibliothèque gardée en mémoire, avec les mêmes règles et leurs propres spots. ${online} lecteur${online > 1 ? 's' : ''} en ligne.`}
               </div>
-            ))}
+            )}
           </div>
-        ) : (
-          <p style={{ margin: '10px 0 0', fontSize: 15 }}>{az.reason}</p>
-        )}
+          <Link className="btn btn-secondary btn-small" href="/regie/emetteur">{air.installed ? 'Émetteur' : 'Installer l’émetteur'}</Link>
+        </div>
       </section>
 
       <div className="row">
