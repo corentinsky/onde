@@ -1,6 +1,6 @@
 import { getSession, listSpots, listStoreStatus } from '@/lib/data';
 import { frequency, statusLabel } from '@/lib/format';
-import { createSpot, setSpotStatus, toggleHqSpots } from '../actions';
+import { createSpot, setSpotStatus, startEmergency, stopEmergency, toggleHqSpots } from '../actions';
 
 export const metadata = { title: 'Spots nationaux' };
 
@@ -38,6 +38,35 @@ export default async function Spots() {
             </button>
           </form>
         </div>
+      </section>
+
+      <section className="card" aria-label="Annonce d’urgence" style={org.emergency ? { background: '#fff1f0', borderColor: '#ffd1cc' } : undefined}>
+        {org.emergency ? (
+          <div className="page-head" style={{ alignItems: 'center' }}>
+            <div>
+              <div className="status" style={{ color: '#b3261e', fontWeight: 600 }}><span className="dot" style={{ background: 'var(--danger)' }} />Annonce d’urgence en cours</div>
+              <p style={{ margin: '8px 0 0', maxWidth: 640 }}>{org.emergency.text}</p>
+            </div>
+            <form action={stopEmergency}>
+              <input type="hidden" name="org_id" value={org.id} />
+              <button className="btn btn-dark" type="submit">Arrêter l’annonce</button>
+            </form>
+          </div>
+        ) : (
+          <form action={startEmergency} className="page-head" style={{ alignItems: 'center' }}>
+            <input type="hidden" name="org_id" value={org.id} />
+            <div>
+              <h2>Annonce d’urgence</h2>
+              <p className="sub">Coupe la musique et passe immédiatement dans toutes les boutiques, avant tout autre spot.</p>
+              <div className="choice" style={{ marginTop: 12 }}>
+                <label><input type="radio" name="kind" value="evacuation" defaultChecked /><span>Évacuation</span></label>
+                <label><input type="radio" name="kind" value="closing" /><span>Fermeture immédiate</span></label>
+                <label><input type="radio" name="kind" value="security" /><span>Consignes de sécurité</span></label>
+              </div>
+            </div>
+            <button className="btn btn-danger" type="submit">Diffuser maintenant</button>
+          </form>
+        )}
       </section>
 
       <div className="row">

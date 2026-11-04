@@ -135,3 +135,55 @@ export async function signOut() {
   }
   redirect('/login');
 }
+
+const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+function pairingCode(len = 8) {
+  const bytes = crypto.getRandomValues(new Uint8Array(len));
+  return Array.from(bytes, (b) => CODE_ALPHABET[b % CODE_ALPHABET.length]).join('');
+}
+
+export async function addDevice(form: FormData) {
+  const storeId = str(form, 'store_id');
+  const code = pairingCode();
+  if (isConfigured) {
+    const sb = await supabaseServer();
+    const { error } = await sb.from('devices').insert({ store_id: storeId, name: 'Lecteur', pairing_code: code });
+    if (error) throw error;
+    back(`/regie/boutiques/${storeId}`);
+  }
+  revalidatePath('/regie', 'layout');
+  redirect(`/regie/boutiques/${storeId}?demo=1&code=${code}`);
+}
+
+const EMERGENCY_TEXT: Record<string, string> = {
+  evacuation: 'Votre attention s’il vous plaît. Pour votre sécurité, nous vous demandons d’évacuer le magasin par la sortie la plus proche, dans le calme.',
+  closing: 'Votre attention s’il vous plaît. Le magasin va fermer exceptionnellement. Merci de vous diriger vers les caisses.',
+  security: 'Votre attention s’il vous plaît. Merci de suivre les consignes de notre personnel.'
+};
+
+export async function startEmergency(form: FormData) {
+  const orgId = str(form, 'org_id');
+  const kind = str(form, 'kind');
+  const text = EMERGENCY_TEXT[kind];
+  if (!text) throw new Error('Type d’urgence inconnu');
+  if (isConfigured) {
+    const sb = await supabaseServer();
+    const {
+      data: { user }
+    } = await sb.auth.getUser();
+    const emergency = { id: crypto.randomUUID(), kind, text, started_at: new Date().toISOString(), started_by: user?.id ?? null };
+    const { error } = await sb.from('organizations').update({ emergency }).eq('id', orgId);
+    if (error) throw error;
+  }
+  back('/regie/spots');
+}
+
+export async function stopEmergency(form: FormData) {
+  const orgId = str(form, 'org_id');
+  if (isConfigured) {
+    const sb = await supabaseServer();
+    const { error } = await sb.from('organizations').update({ emergency: null }).eq('id', orgId);
+    if (error) throw error;
+  }
+  back('/regie/spots');
+}

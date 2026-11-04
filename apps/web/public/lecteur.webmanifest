@@ -1,0 +1,10 @@
+{
+  "name": "Onde — lecteur boutique",
+  "short_name": "Onde",
+  "start_url": "/lecteur",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#000000",
+  "theme_color": "#000000",
+  "lang": "fr"
+}

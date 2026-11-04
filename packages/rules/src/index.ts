@@ -260,3 +260,5 @@ export function expandDay(spot: RecurringSpot, dayStart: number): SpotRequest[] 
       windowMin: spot.windowMin
     }));
 }
+
+export * from './player';

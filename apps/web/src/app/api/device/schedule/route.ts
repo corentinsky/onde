@@ -1,8 +1,10 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { authDevice } from '@/lib/device';
+import { authDevice, storeStream } from '@/lib/device';
 import { supabaseService } from '@/lib/supabase/server';
 
 /** Tout ce dont le lecteur a besoin pour jouer seul, même hors connexion : règles, spots, flux. */
+export const dynamic = 'force-dynamic';
+
 export async function GET(req: NextRequest) {
   const ctx = await authDevice(req);
   if (ctx instanceof NextResponse) return ctx;
@@ -21,7 +23,7 @@ export async function GET(req: NextRequest) {
     sb.from('zones').select('id, name, volume, messages_enabled, jingles_enabled, ambiences(name, stream_url)').eq('store_id', ctx.storeId)
   ]);
 
-  type S = { id: string; origin: string; starts_on: string | null; ends_on: string | null };
+  type S = { id: string; origin: string; starts_on: string | null; ends_on: string | null; audio_path: string | null };
   const seen = new Set<string>();
   const spots = (targets ?? [])
     .filter((t) => t.scope === 'all' || (t.scope === 'region' && t.region_id === ctx.regionId) || (t.scope === 'store' && t.store_id === ctx.storeId))
@@ -30,5 +32,15 @@ export async function GET(req: NextRequest) {
     .filter((s) => (org?.hq_spots_enabled === false ? s.origin === 'store' || s.origin === 'emergency' : true))
     .filter((s) => (seen.has(s.id) ? false : (seen.add(s.id), true)));
 
-  return NextResponse.json({ generated_at: new Date().toISOString(), store, rules, org, spots, zones: zones ?? [] });
+  // Liens audio signés 24 h : le lecteur télécharge les fichiers et peut les rejouer hors connexion.
+  const withAudio = await Promise.all(
+    spots.map(async (s) => {
+      if (!s.audio_path) return { ...s, audio_url: null };
+      const { data } = await sb.storage.from('spots').createSignedUrl(s.audio_path, 60 * 60 * 24);
+      return { ...s, audio_url: data?.signedUrl ?? null };
+    })
+  );
+  const stream = await storeStream(sb, ctx.orgId, ctx.storeId);
+
+  return NextResponse.json({ generated_at: new Date().toISOString(), store, rules, org, stream, spots: withAudio, zones: zones ?? [] });
 }

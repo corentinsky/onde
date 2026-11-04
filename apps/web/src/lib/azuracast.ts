@@ -58,3 +58,19 @@ export async function uploadFile(station: string, path: string, data: ArrayBuffe
     revalidate: 0
   });
 }
+
+export interface StationNowPlaying {
+  title: string;
+  artist: string;
+  elapsed: number;
+  duration: number;
+  remaining: number;
+}
+
+/** Titre en cours d’une station, avec le temps restant (pour placer les spots entre deux titres). */
+export async function nowPlaying(station: string): Promise<StationNowPlaying | null> {
+  const np = await call<NowPlaying>(`/nowplaying/${encodeURIComponent(station)}`, { revalidate: 0 });
+  if (!np.now_playing) return null;
+  const { elapsed, duration, song } = np.now_playing;
+  return { title: song.title, artist: song.artist, elapsed, duration, remaining: Math.max(0, duration - elapsed) };
+}

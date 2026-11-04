@@ -1,16 +1,18 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { getSession, getStore, listIncidents, listPlayLogs } from '@/lib/data';
+import { getSession, getStore, listDevices, listIncidents, listPlayLogs } from '@/lib/data';
 import { ago, clock, hours, incidentLabel, originLabel, stateLabel } from '@/lib/format';
-import { resolveIncident } from '../../actions';
+import { addDevice, resolveIncident } from '../../actions';
 
-export default async function StorePage({ params }: { params: Promise<{ id: string }> }) {
+export default async function StorePage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ code?: string }> }) {
   const { id } = await params;
+  const { code: demoCode } = await searchParams;
   const { org } = await getSession();
   if (!org) return null;
   const store = await getStore(id);
   if (!store) notFound();
-  const [logs, incidents] = await Promise.all([listPlayLogs(id), listIncidents(org.id, id)]);
+  const [logs, incidents, devices] = await Promise.all([listPlayLogs(id), listIncidents(org.id, id), listDevices(id)]);
+  const pendingCodes = [...devices.filter((d) => d.pairing_code).map((d) => d.pairing_code as string), ...(demoCode ? [demoCode] : [])];
   const played = logs.filter((l) => l.status === 'played').length;
   const missed = logs.length - played;
 
@@ -62,6 +64,38 @@ export default async function StorePage({ params }: { params: Promise<{ id: stri
           </div>
         </section>
       </div>
+
+      <section className="card">
+        <div className="page-head" style={{ alignItems: 'center' }}>
+          <div>
+            <h2>Lecteurs</h2>
+            <p className="sub">Une tablette ou un mini-PC branché sur la sono de la boutique.</p>
+          </div>
+          <form action={addDevice}>
+            <input type="hidden" name="store_id" value={id} />
+            <button className="btn btn-secondary" type="submit">Ajouter un lecteur</button>
+          </form>
+        </div>
+        {pendingCodes.map((c) => (
+          <div key={c} className="notice" style={{ marginTop: 16, background: '#eef5ff', color: 'var(--text)', alignItems: 'center' }}>
+            <div style={{ fontSize: 28, fontWeight: 700, letterSpacing: '0.12em', fontVariantNumeric: 'tabular-nums' }}>{c}</div>
+            <div className="small">
+              Sur l’appareil de la boutique, ouvrez <strong>/lecteur</strong> sur l’adresse d’Onde et saisissez ce code. Il ne sert qu’une fois.
+            </div>
+          </div>
+        ))}
+        <div className="list">
+          {devices.filter((d) => !d.pairing_code).map((d) => (
+            <div className="list-item" key={d.id}>
+              <div>
+                <div style={{ fontWeight: 500 }}>{d.name}</div>
+                <div className="small muted">Version {d.app_version ?? '—'} · dernier signal {ago(d.last_seen_at)}</div>
+              </div>
+              <span className="tag">Appairé</span>
+            </div>
+          ))}
+        </div>
+      </section>
 
       <section className="card">
         <h2>Preuves de diffusion</h2>

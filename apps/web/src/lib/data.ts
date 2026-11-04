@@ -11,6 +11,15 @@ export interface Org {
   name: string;
   slug: string;
   hq_spots_enabled: boolean;
+  emergency?: { id: string; kind: string; text: string; started_at: string } | null;
+}
+
+export interface Device {
+  id: string;
+  name: string;
+  pairing_code: string | null;
+  last_seen_at: string | null;
+  app_version: string | null;
 }
 
 export interface Session {
@@ -99,7 +108,7 @@ export async function getSession(): Promise<Session> {
   if (!user) return { mode: 'live', userName: '', userEmail: '', isPlatformAdmin: false, orgs: [], org: null };
   const [{ data: profile }, { data: orgs }] = await Promise.all([
     sb.from('profiles').select('full_name,is_platform_admin').eq('id', user.id).maybeSingle(),
-    sb.from('organizations').select('id,name,slug,hq_spots_enabled').order('name')
+    sb.from('organizations').select('id,name,slug,hq_spots_enabled,emergency').order('name')
   ]);
   const list = (orgs ?? []) as Org[];
   return {
@@ -202,4 +211,12 @@ export async function listPlayLogs(storeId: string): Promise<PlayLog[]> {
       reason: p.reason as string | null
     };
   });
+}
+
+export async function listDevices(storeId: string): Promise<Device[]> {
+  if (!isConfigured) return [{ id: 'd2', name: 'Onde Box', pairing_code: null, last_seen_at: new Date(Date.now() - 12_000).toISOString(), app_version: '0.1.0' }];
+  const sb = await supabaseServer();
+  const { data, error } = await sb.from('devices').select('id,name,pairing_code,last_seen_at,app_version').eq('store_id', storeId).order('created_at');
+  if (error) throw error;
+  return (data ?? []) as Device[];
 }

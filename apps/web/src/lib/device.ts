@@ -33,3 +33,14 @@ export async function authDevice(req: NextRequest): Promise<DeviceCtx | NextResp
   const store = data.stores as unknown as { org_id: string; region_id: string | null };
   return { deviceId: data.id, storeId: data.store_id, orgId: store.org_id, regionId: store.region_id };
 }
+
+type SB = ReturnType<typeof supabaseService>;
+
+/** Flux de la boutique : ambiance de la première zone, sinon première ambiance de l’enseigne. */
+export async function storeStream(sb: SB, orgId: string, storeId: string): Promise<{ name: string; station: string | null; url: string | null } | null> {
+  const { data: zone } = await sb.from('zones').select('ambiences(name, azuracast_station, stream_url)').eq('store_id', storeId).not('ambience_id', 'is', null).limit(1).maybeSingle();
+  const fromZone = zone?.ambiences as unknown as { name: string; azuracast_station: string | null; stream_url: string | null } | null;
+  if (fromZone) return { name: fromZone.name, station: fromZone.azuracast_station, url: fromZone.stream_url };
+  const { data: amb } = await sb.from('ambiences').select('name, azuracast_station, stream_url').eq('org_id', orgId).order('name').limit(1).maybeSingle();
+  return amb ? { name: amb.name, station: amb.azuracast_station, url: amb.stream_url } : null;
+}
