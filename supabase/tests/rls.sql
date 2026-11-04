@@ -38,8 +38,8 @@ select pg_temp.check((select count(*) from public.organizations) = 1, 'le siège
 select pg_temp.check((select count(*) from public.stores) = 6, 'le siège voit ses 6 boutiques');
 select pg_temp.check((select count(*) from public.spots) = 5, 'le siège voit tous les spots de son enseigne');
 select pg_temp.check((select count(*) from public.store_status) = 6, 'la supervision du siège couvre ses boutiques');
-insert into public.spots (org_id, origin, title, duration_sec, status) values ('a0000000-0000-4000-8000-000000000001', 'national', 'Test siège', 10, 'draft');
-select pg_temp.check(true, 'le siège peut créer un spot national');
+insert into public.spots (org_id, origin, title, duration_sec, status) values ('a0000000-0000-4000-8000-000000000001', 'national', 'Test siège', 10, 'draft') returning id;
+select pg_temp.check(true, 'le siège peut créer un spot national et le relire aussitôt (returning)');
 update public.organizations set hq_spots_enabled = false where id = 'a0000000-0000-4000-8000-000000000001';
 select pg_temp.check((select not hq_spots_enabled from public.organizations), 'le siège peut suspendre ses spots nationaux');
 reset role;
@@ -65,7 +65,8 @@ select pg_temp.check((select count(*) from public.stores) = 1, 'la boutique ne v
 select pg_temp.check((select count(*) from public.spots where origin = 'national') = 3, 'la boutique voit les spots nationaux');
 select pg_temp.check((select count(*) from public.spots where origin = 'store') = 1, 'la boutique ne voit pas les messages des autres boutiques');
 select pg_temp.check((select count(*) from public.incidents) = 0, 'la boutique ne voit pas les incidents des autres');
-insert into public.spots (id, org_id, origin, title, duration_sec, status) values ('e0000000-0000-4000-8000-0000000000ff', 'a0000000-0000-4000-8000-000000000001', 'store', 'Ma promo', 10, 'pending_review');
+insert into public.spots (id, org_id, origin, title, duration_sec, status) values ('e0000000-0000-4000-8000-0000000000ff', 'a0000000-0000-4000-8000-000000000001', 'store', 'Ma promo', 10, 'pending_review') returning id;
+select pg_temp.check(true, 'la boutique peut proposer un message et le relire aussitôt (returning)');
 insert into public.spot_targets (spot_id, scope, store_id) values ('e0000000-0000-4000-8000-0000000000ff', 'store', 'c0000000-0000-4000-8000-000000000002');
 select pg_temp.check(true, 'la boutique peut proposer un message pour elle-même');
 do $$ begin
