@@ -101,7 +101,7 @@ export default async function Emetteur({ searchParams }: { searchParams: Promise
                         <details style={{ marginTop: 6 }}>
                           <summary className="muted">Derniers titres</summary>
                           {recent.map((p, i) => (
-                            <div key={i} className="muted">{clock((p.started_at ?? p.queued_at) as string)} · {p.title}{p.started_at ? '' : ' (à venir)'}</div>
+                            <div key={i} className="muted">{clock((p.started_at ?? p.queued_at) as string)} · {p.title}{p.started_at ? '' : i === 0 ? ' (à venir)' : ' (non diffusé)'}</div>
                           ))}
                         </details>
                       )}

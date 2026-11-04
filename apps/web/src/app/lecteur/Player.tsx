@@ -220,7 +220,9 @@ export function Player({ demo }: { demo: boolean }) {
           method: 'POST',
           body: JSON.stringify({
             app_version: VERSION,
-            now_playing: cur ? { title: cur.title, artist: cur.artist, ambience: cur.ambience ?? null, ends_at: new Date(cur.at + cur.remaining * 1000).toISOString() } : null,
+            now_playing: cur
+              ? { title: cur.title, artist: cur.artist, ambience: cur.ambience ?? null, ends_at: cur.remaining > 0 ? new Date(cur.at + cur.remaining * 1000).toISOString() : null }
+              : null,
             cache_seconds: engine.current ? engine.current.cacheSeconds() : null,
             output_lufs: engine.current?.running ? outputLufs.current : null
           })
