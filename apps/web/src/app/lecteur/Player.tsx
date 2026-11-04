@@ -11,7 +11,9 @@ import { buildRequests, decide, toRules, type PlayedSpot, type ScheduleSpot, typ
 import './player.css';
 
 const VERSION = '0.2.0-web';
-const K = { token: 'onde.token', schedule: 'onde.schedule', logs: 'onde.logs', history: 'onde.history', handled: 'onde.handled', emergency: 'onde.emergency' };
+const keys = (p: string) => ({ token: `${p}token`, schedule: `${p}schedule`, logs: `${p}logs`, history: `${p}history`, handled: `${p}handled`, emergency: `${p}emergency` });
+// La démo a son propre stockage : ses données ne doivent jamais partir vers le serveur.
+let K = keys('onde.');
 
 type Spot = ScheduleSpot & { script?: string; audio_url?: string | null };
 interface Schedule {
@@ -72,6 +74,7 @@ function demoSchedule(): Schedule {
 }
 
 export function Player({ demo }: { demo: boolean }) {
+  K = keys(demo ? 'onde.demo.' : 'onde.');
   const [token, setToken] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
   const [code, setCode] = useState('');

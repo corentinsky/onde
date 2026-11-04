@@ -4,14 +4,16 @@ import { supabaseService } from '@/lib/supabase/server';
 
 type Entry = { spot_id: string; scheduled_for?: string; played_at?: string; status: 'played' | 'partial' | 'missed' | 'skipped'; reason?: string };
 const STATUSES = new Set(['played', 'partial', 'missed', 'skipped']);
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** Preuves de diffusion, envoyées par lots (le lecteur garde la file s’il est hors connexion). */
 export async function POST(req: NextRequest) {
   const ctx = await authDevice(req);
   if (ctx instanceof NextResponse) return ctx;
   const b = (await req.json().catch(() => ({}))) as { entries?: Entry[] };
-  const entries = (b.entries ?? []).slice(0, 500).filter((e) => e && typeof e.spot_id === 'string' && STATUSES.has(e.status));
-  if (!entries.length) return deny(400, 'Aucune entrée valide');
+  const entries = (b.entries ?? []).slice(0, 500).filter((e) => e && typeof e.spot_id === 'string' && UUID.test(e.spot_id) && STATUSES.has(e.status));
+  // Rien de valide : on répond OK pour que le lecteur vide sa file au lieu de la renvoyer sans fin.
+  if (!entries.length) return NextResponse.json({ ok: true, saved: 0 });
   const sb = supabaseService();
   const rows = entries.map((e) => ({
     org_id: ctx.orgId,
