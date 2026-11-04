@@ -26,13 +26,20 @@ const fr: Record<string, string> = {
 };
 const t = (s?: string) => (s ? (fr[s.toLowerCase()] ?? s) : '');
 
-export async function listVoices(): Promise<Voice[]> {
-  if (!voiceConfigured) return [];
+/** Voix disponibles sur le compte, ou la raison pour laquelle on ne peut pas les lire. */
+export async function listVoices(): Promise<{ voices: Voice[]; error: string | null }> {
+  if (!voiceConfigured) return { voices: [], error: null };
   try {
-    const res = await fetch(`${API}/voices`, { headers: { 'xi-api-key': KEY }, next: { revalidate: 3600 } });
-    if (!res.ok) return [];
+    // Pas de cache : une réponse d’erreur ne doit pas rester en mémoire une heure.
+    const res = await fetch(`${API}/voices`, { headers: { 'xi-api-key': KEY }, cache: 'no-store' });
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '');
+      if (/missing_permissions|voices_read/i.test(detail)) return { voices: [], error: 'La clé ElevenLabs n’a pas le droit de lire les voix : activez « Voices » (lecture) sur la clé.' };
+      if (res.status === 401) return { voices: [], error: 'Clé ElevenLabs refusée : vérifiez qu’elle est complète et active.' };
+      return { voices: [], error: `ElevenLabs a répondu ${res.status}.` };
+    }
     const body = (await res.json()) as { voices?: { voice_id: string; name: string; labels?: Record<string, string>; preview_url?: string }[] };
-    return (body.voices ?? [])
+    const voices = (body.voices ?? [])
       .map((v) => ({
         id: v.voice_id,
         name: v.name.split(/\s[-–]\s/)[0],
@@ -40,8 +47,9 @@ export async function listVoices(): Promise<Voice[]> {
         preview: v.preview_url ?? null
       }))
       .sort((a, b) => a.name.localeCompare(b.name, 'fr'));
+    return { voices, error: voices.length ? null : 'Aucune voix sur ce compte ElevenLabs.' };
   } catch {
-    return [];
+    return { voices: [], error: 'ElevenLabs injoignable pour l’instant.' };
   }
 }
 
@@ -59,6 +67,7 @@ export async function synthesize(text: string, voiceId: string): Promise<ArrayBu
   });
   if (!res.ok) {
     const detail = await res.text().catch(() => '');
+    if (/missing_permissions|text_to_speech/i.test(detail)) throw new Error('La clé ElevenLabs n’a pas le droit « Text to Speech » : activez-le sur la clé.');
     if (res.status === 401) throw new Error('Clé ElevenLabs refusée');
     if (res.status === 429 || /quota/i.test(detail)) throw new Error('Quota ElevenLabs atteint pour ce mois');
     throw new Error(`ElevenLabs a répondu ${res.status}`);

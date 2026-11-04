@@ -28,7 +28,7 @@ export const metadata = { title: 'Spots nationaux' };
 export default async function Spots() {
   const { org } = await getSession();
   if (!org) return null;
-  const [all, stores, voices] = await Promise.all([listSpots(org.id), listStoreStatus(org.id), listVoices()]);
+  const [all, stores, { voices, error: voiceError }] = await Promise.all([listSpots(org.id), listStoreStatus(org.id), listVoices()]);
   const spots = all.filter((s) => s.origin !== 'store');
   const { spotUrl, beds } = await audioLinks(spots.map((s) => s.audio_path).filter((p): p is string => !!p));
 
@@ -127,7 +127,7 @@ export default async function Spots() {
           <form action={createSpot} style={{ display: 'flex', flexDirection: 'column', gap: 14, marginTop: 18 }}>
             <input type="hidden" name="org_id" value={org.id} />
             <label className="field"><span>Titre</span><input className="input" name="title" required placeholder="Carte cadeau de Noël" /></label>
-            <SpotAudio orgId={org.id} voices={voices} beds={beds} voiceReady={voiceConfigured && voices.length > 0} />
+            <SpotAudio orgId={org.id} voices={voices} beds={beds} voiceReady={voiceConfigured && voices.length > 0} voiceError={voiceConfigured ? voiceError : null} />
             <div className="form-grid">
               <label className="field"><span>Durée (s), si texte seul</span><input className="input" type="number" name="duration_sec" min={1} max={600} defaultValue={15} /></label>
               <label className="field"><span>Du</span><input className="input" type="date" name="starts_on" /></label>

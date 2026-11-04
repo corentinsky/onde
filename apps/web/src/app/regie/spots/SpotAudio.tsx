@@ -14,11 +14,12 @@ interface Props {
   voices: { id: string; name: string; description: string }[];
   beds: { id: string; label: string; url: string }[];
   voiceReady: boolean;
+  voiceError?: string | null;
 }
 
 type Mode = 'ai' | 'file' | 'none';
 
-export function SpotAudio({ orgId, voices, beds, voiceReady }: Props) {
+export function SpotAudio({ orgId, voices, beds, voiceReady, voiceError }: Props) {
   const [mode, setMode] = useState<Mode>(voiceReady ? 'ai' : 'file');
   const [text, setText] = useState('');
   const [voice, setVoice] = useState(voices[0]?.id ?? '');
@@ -93,7 +94,11 @@ export function SpotAudio({ orgId, voices, beds, voiceReady }: Props) {
         <textarea className="textarea" name="script" value={text} onChange={(e) => setText(e.target.value)} maxLength={800} placeholder="Offrez l’élégance : la carte cadeau est disponible en caisse." />
       </label>
       {mode === 'none' && <p className="small muted" style={{ margin: 0 }}>Le lecteur lira le texte avec la voix de l’appareil : à réserver aux essais.</p>}
-      {!voiceReady && <p className="small muted" style={{ margin: 0 }}>Voix IA : ajoutez la clé ELEVENLABS_API_KEY dans Vercel pour l’activer.</p>}
+      {!voiceReady && (
+        <p className="small muted" style={{ margin: 0 }}>
+          {voiceError ? `Voix IA indisponible : ${voiceError}` : 'Voix IA : ajoutez la clé ELEVENLABS_API_KEY dans Vercel pour l’activer.'}
+        </p>
+      )}
 
       {mode === 'ai' && voiceReady && (
         <div className="form-grid" style={{ alignItems: 'end' }}>
