@@ -1,14 +1,36 @@
 import { getSession, listSpots, listStoreStatus } from '@/lib/data';
 import { frequency, statusLabel } from '@/lib/format';
+import { isConfigured, supabaseServer } from '@/lib/supabase/server';
+import { listVoices, voiceConfigured } from '@/lib/voice';
 import { createSpot, setSpotStatus, startEmergency, stopEmergency, toggleHqSpots } from '../actions';
+import { SpotAudio } from './SpotAudio';
+
+/** Liens d’écoute des spots, et morceaux de la bibliothèque proposés en fond musical. */
+async function audioLinks(paths: string[]) {
+  if (!isConfigured) return { spotUrl: new Map<string, string>(), beds: [] as { id: string; label: string; url: string }[] };
+  const sb = await supabaseServer();
+  const [{ data: signed }, { data: tracks }] = await Promise.all([
+    paths.length ? sb.storage.from('spots').createSignedUrls(paths, 3600) : Promise.resolve({ data: [] as { path: string | null; signedUrl: string }[] }),
+    sb.from('tracks').select('id, title, artist, storage_path').eq('enabled', true).order('title').limit(40)
+  ]);
+  const { data: bedUrls } = tracks?.length ? await sb.storage.from('music').createSignedUrls(tracks.map((t) => t.storage_path as string), 3600) : { data: [] };
+  const bedUrl = new Map((bedUrls ?? []).map((u) => [u.path, u.signedUrl]));
+  return {
+    spotUrl: new Map((signed ?? []).filter((u) => u.path).map((u) => [u.path as string, u.signedUrl])),
+    beds: (tracks ?? [])
+      .map((t) => ({ id: t.id as string, label: `${t.title}${t.artist ? ` · ${t.artist}` : ''}`, url: bedUrl.get(t.storage_path as string) ?? '' }))
+      .filter((b) => b.url)
+  };
+}
 
 export const metadata = { title: 'Spots nationaux' };
 
 export default async function Spots() {
   const { org } = await getSession();
   if (!org) return null;
-  const [all, stores] = await Promise.all([listSpots(org.id), listStoreStatus(org.id)]);
+  const [all, stores, voices] = await Promise.all([listSpots(org.id), listStoreStatus(org.id), listVoices()]);
   const spots = all.filter((s) => s.origin !== 'store');
+  const { spotUrl, beds } = await audioLinks(spots.map((s) => s.audio_path).filter((p): p is string => !!p));
 
   return (
     <>
@@ -78,8 +100,11 @@ export default async function Spots() {
               <div className="list-item" key={s.id} style={{ alignItems: 'flex-start' }}>
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontWeight: 600 }}>{s.title}</div>
-                  <div className="small muted">{s.target} · {frequency(s)} · {s.duration_sec} s</div>
+                  <div className="small muted">
+                    {s.target} · {frequency(s)} · {s.duration_sec} s · {s.audio_kind === 'ai' ? `voix IA${s.voice_name ? ` (${s.voice_name})` : ''}` : s.audio_path ? 'fichier' : 'texte seul'}
+                  </div>
                   {s.script && <div className="small" style={{ marginTop: 6 }}>{s.script}</div>}
+                  {s.audio_path && spotUrl.get(s.audio_path) && <audio controls preload="none" src={spotUrl.get(s.audio_path) ?? undefined} style={{ marginTop: 8, height: 32, maxWidth: '100%' }} aria-label={`Écouter ${s.title}`} />}
                 </div>
                 <div className="actions" style={{ flex: '0 0 auto' }}>
                   <span className="tag">{statusLabel[s.status]}</span>
@@ -102,9 +127,9 @@ export default async function Spots() {
           <form action={createSpot} style={{ display: 'flex', flexDirection: 'column', gap: 14, marginTop: 18 }}>
             <input type="hidden" name="org_id" value={org.id} />
             <label className="field"><span>Titre</span><input className="input" name="title" required placeholder="Carte cadeau de Noël" /></label>
-            <label className="field"><span>Texte lu</span><textarea className="textarea" name="script" placeholder="Offrez l’élégance : la carte cadeau est disponible en caisse." /></label>
+            <SpotAudio orgId={org.id} voices={voices} beds={beds} voiceReady={voiceConfigured && voices.length > 0} />
             <div className="form-grid">
-              <label className="field"><span>Durée (s)</span><input className="input" type="number" name="duration_sec" min={1} max={600} defaultValue={15} /></label>
+              <label className="field"><span>Durée (s), si texte seul</span><input className="input" type="number" name="duration_sec" min={1} max={600} defaultValue={15} /></label>
               <label className="field"><span>Du</span><input className="input" type="date" name="starts_on" /></label>
               <label className="field"><span>Au</span><input className="input" type="date" name="ends_on" /></label>
             </div>

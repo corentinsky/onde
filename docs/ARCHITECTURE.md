@@ -56,6 +56,15 @@ tel quel, sans repérage exact des titres.
 
 Toutes les routes sauf `pair` exigent `Authorization: Bearer <jeton>`.
 
+## Son des spots
+
+- **Voix IA** (ElevenLabs, clé `ELEVENLABS_API_KEY` côté serveur) : le texte est transformé en voix par le serveur,
+  puis le navigateur ajoute un fond musical facultatif (un titre de la bibliothèque, 16 LU sous la voix),
+  normalise à −18 LUFS (crête sous −1 dBFS) et enregistre un WAV dans `spots/<enseigne>/`.
+- **Fichier produit** (agence, siège) : même normalisation, même dossier.
+- **Texte seul** : lu par la voix de l’appareil, pour les essais.
+Le lecteur reçoit un fichier normal : identique dans toutes les boutiques, jouable hors connexion.
+
 ## API de l’émetteur
 
 | Route | Rôle |

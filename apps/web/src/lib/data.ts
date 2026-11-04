@@ -68,6 +68,9 @@ export interface Spot {
   daily_end: string;
   every_min: number | null;
   fixed_times: string[] | null;
+  audio_path?: string | null;
+  audio_kind?: 'ai' | 'file' | null;
+  voice_name?: string | null;
   target: string;
   created_at: string;
 }

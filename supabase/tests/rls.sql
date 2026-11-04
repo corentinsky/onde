@@ -197,3 +197,33 @@ set role anon;
 select pg_temp.check((select count(*) from public.streams) = 0, 'un visiteur anonyme ne voit aucun flux');
 select pg_temp.check((select count(*) from public.emitters) = 0, 'ni aucun émetteur');
 reset role;
+
+-- ───────────── Fichiers audio des spots ─────────────
+select pg_temp.as_user('f0000000-0000-4000-8000-000000000002');
+insert into storage.objects (bucket_id, name) values ('spots', 'a0000000-0000-4000-8000-000000000001/voix.wav');
+select pg_temp.check((select count(*) from storage.objects where bucket_id = 'spots') = 1, 'le siège dépose un fichier de spot dans le dossier de son enseigne');
+do $$ begin
+  begin
+    insert into storage.objects (bucket_id, name) values ('spots', 'a0000000-0000-4000-8000-000000000002/intrus.wav');
+    raise exception 'ÉCHEC : le siège a pu déposer un fichier chez une autre enseigne';
+  exception when insufficient_privilege then raise notice 'ok : pas de dépôt dans le dossier d’une autre enseigne';
+  end;
+end $$;
+do $$ begin
+  begin
+    insert into storage.objects (bucket_id, name) values ('spots', 'pas-un-dossier/voix.wav');
+    raise exception 'ÉCHEC : un fichier hors dossier d’enseigne a été accepté';
+  exception when insufficient_privilege then raise notice 'ok : fichier hors dossier d’enseigne refusé';
+  end;
+end $$;
+reset role;
+
+select pg_temp.as_user('f0000000-0000-4000-8000-000000000003');
+select pg_temp.check((select count(*) from storage.objects where bucket_id = 'spots') = 1, 'la boutique entend les fichiers de son enseigne');
+delete from storage.objects where bucket_id = 'spots';
+select pg_temp.check((select count(*) from storage.objects where bucket_id = 'spots') = 1, 'la boutique ne peut pas supprimer un fichier de spot');
+reset role;
+
+select pg_temp.as_user('f0000000-0000-4000-8000-000000000004');
+select pg_temp.check((select count(*) from storage.objects where bucket_id = 'spots') = 0, 'une autre enseigne ne voit pas les fichiers Aubert');
+reset role;

@@ -26,6 +26,19 @@ export async function selectOrg(form: FormData) {
   back(str(form, 'from') || '/regie');
 }
 
+/** Son du spot préparé dans le navigateur (voix IA ou fichier), rangé dans le dossier de l’enseigne. */
+function spotAudio(form: FormData, orgId: string): { audio_path?: string; audio_kind?: 'ai' | 'file'; voice_name?: string | null; duration_sec?: number } {
+  const path = str(form, 'audio_path');
+  if (!path || !path.startsWith(`${orgId}/`) || !/^[0-9a-f-]{36}\/[0-9a-f-]{36}\.wav$/.test(path)) return {};
+  const kind = str(form, 'audio_kind') === 'ai' ? 'ai' : 'file';
+  return {
+    audio_path: path,
+    audio_kind: kind,
+    voice_name: kind === 'ai' ? str(form, 'voice_name').slice(0, 80) || null : null,
+    duration_sec: num(form, 'audio_duration', 1, 600)
+  };
+}
+
 export async function createSpot(form: FormData) {
   const orgId = str(form, 'org_id');
   const title = str(form, 'title');
@@ -46,8 +59,9 @@ export async function createSpot(form: FormData) {
     daily_start: str(form, 'daily_start') || '10:00',
     daily_end: str(form, 'daily_end') || '19:00',
     every_min: freq === 'fixed' ? null : Number(freq) || 120,
-    fixed_times: freq === 'fixed' ? [fixed || '10:00'] : null
-  };
+    fixed_times: freq === 'fixed' ? [fixed || '10:00'] : null,
+    ...spotAudio(form, orgId)
+  } as Record<string, unknown>;
   if (isConfigured) {
     const sb = await supabaseServer();
     const { data, error } = await sb.from('spots').insert(spot).select('id').single();
