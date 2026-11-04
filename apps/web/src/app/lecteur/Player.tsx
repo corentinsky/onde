@@ -2,29 +2,41 @@
 
 /**
  * Lecteur boutique (version pilote, dans un navigateur).
- * Joue le flux de l’ambiance, insère les spots entre deux titres selon les règles,
- * envoie son signal de vie et ses preuves de diffusion. Garde son programme en mémoire
- * pour continuer les spots si la connexion tombe.
+ * Joue lui-même la musique de la bibliothèque (programmation, normalisation, points de mix),
+ * ou à défaut le flux de l’ambiance ; insère les spots entre deux titres selon les règles,
+ * envoie son signal de vie, ses preuves de diffusion et l’historique des titres.
+ * Garde son programme et sa musique en mémoire pour continuer si la connexion tombe.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { buildRequests, decide, toRules, type PlayedSpot, type ScheduleSpot, type ScheduledSpot } from '@onde/rules';
+import { buildRequests, decide, toRules, type Decision, type PlayedSpot, type ScheduleSpot, type ScheduledSpot } from '@onde/rules';
+import { MusicEngine, type MusicSchedule, type TrackStart } from './MusicEngine';
 import './player.css';
 
-const VERSION = '0.2.0-web';
-const keys = (p: string) => ({ token: `${p}token`, schedule: `${p}schedule`, logs: `${p}logs`, history: `${p}history`, handled: `${p}handled`, emergency: `${p}emergency` });
+const VERSION = '0.3.0-web';
+const keys = (p: string) => ({
+  token: `${p}token`,
+  schedule: `${p}schedule`,
+  logs: `${p}logs`,
+  history: `${p}history`,
+  handled: `${p}handled`,
+  emergency: `${p}emergency`,
+  trackplays: `${p}trackplays`
+});
 // La démo a son propre stockage : ses données ne doivent jamais partir vers le serveur.
 let K = keys('onde.');
 
 type Spot = ScheduleSpot & { script?: string; audio_url?: string | null };
 interface Schedule {
-  store: { name: string; max_volume?: number } | null;
+  store: { name: string; max_volume?: number; timezone?: string | null } | null;
   rules: Parameters<typeof toRules>[0] & { duck_music?: boolean };
   org: { hq_spots_enabled: boolean; emergency: Emergency | null } | null;
   stream: { name: string; url: string | null } | null;
   spots: Spot[];
+  music?: MusicSchedule | null;
 }
 interface Emergency { id: string; text: string; kind: string }
-interface NP { title: string; artist: string; remaining: number; at: number }
+interface NP { title: string; artist: string; remaining: number; at: number; ambience?: string; daypart?: string | null; position?: number; length?: number }
+interface TrackPlay { track_id: string; playlist_id: string; title: string; artist: string; isrc: string | null; played_at: string; duration_sec: number }
 interface Log { spot_id: string; scheduled_for: string; played_at?: string; status: 'played' | 'missed'; reason?: string }
 
 const read = <T,>(k: string, fallback: T): T => {
@@ -89,6 +101,8 @@ export function Player({ demo }: { demo: boolean }) {
   const [clock, setClock] = useState(Date.now());
 
   const music = useRef<HTMLAudioElement | null>(null);
+  const engine = useRef<MusicEngine | null>(null);
+  const outputLufs = useRef<number | null>(null);
   const busy = useRef(false);
   const startedAt = useRef(0);
   const scheduleRef = useRef<Schedule | null>(null);
@@ -159,7 +173,7 @@ export function Player({ demo }: { demo: boolean }) {
     return () => clearInterval(id);
   }, [token, demo, api]);
 
-  // ───── Titre en cours : toutes les 15 s (démo : titres simulés de 75 s) ─────
+  // ───── Titre en cours d’un flux externe : toutes les 15 s (démo : titres simulés de 75 s) ─────
   useEffect(() => {
     if (!token || !started) return;
     if (demo) {
@@ -167,16 +181,17 @@ export function Player({ demo }: { demo: boolean }) {
       const tick = () => {
         const elapsed = ((Date.now() - t0) / 1000) % 75;
         const i = Math.floor((Date.now() - t0) / 75_000) % DEMO_TRACKS.length;
-        setNp({ title: DEMO_TRACKS[i][0], artist: DEMO_TRACKS[i][1], remaining: 75 - elapsed, at: Date.now() });
+        setNp({ title: DEMO_TRACKS[i][0], artist: DEMO_TRACKS[i][1], remaining: 75 - elapsed, at: Date.now(), position: elapsed, length: 75 });
       };
       tick();
       const id = setInterval(tick, 5_000);
       return () => clearInterval(id);
     }
     const load = async () => {
+      if (engine.current) return; // musique jouée par le lecteur : il sait ce qu’il joue
       try {
         const r = (await api('nowplaying')) as { now_playing: { title: string; artist: string; remaining: number } | null };
-        setNp(r.now_playing ? { ...r.now_playing, at: Date.now() } : null);
+        if (!engine.current) setNp(r.now_playing ? { ...r.now_playing, at: Date.now() } : null);
       } catch {
         /* inconnu : les spots passent dès qu’ils sont dus */
       }
@@ -186,7 +201,7 @@ export function Player({ demo }: { demo: boolean }) {
     return () => clearInterval(id);
   }, [token, started, demo, api]);
 
-  // ───── Signal de vie et preuves : toutes les 30 s ─────
+  // ───── Signal de vie, preuves et titres joués : toutes les 30 s ─────
   useEffect(() => {
     if (!token || demo) return;
     const beat = async () => {
@@ -196,17 +211,20 @@ export function Player({ demo }: { demo: boolean }) {
           method: 'POST',
           body: JSON.stringify({
             app_version: VERSION,
-            now_playing: cur ? { title: cur.title, artist: cur.artist } : null,
-            cache_seconds: null,
-            output_lufs: null
+            now_playing: cur ? { title: cur.title, artist: cur.artist, ambience: cur.ambience ?? null, ends_at: new Date(cur.at + cur.remaining * 1000).toISOString() } : null,
+            cache_seconds: engine.current ? engine.current.cacheSeconds() : null,
+            output_lufs: engine.current ? outputLufs.current : null
           })
         })) as { emergency: Emergency | null };
         setOnline(true);
         setEmergency(r.emergency);
         const logs = read<Log[]>(K.logs, []);
-        if (logs.length) {
-          await api('playlog', { method: 'POST', body: JSON.stringify({ entries: logs }) });
-          write(K.logs, []);
+        const tracks = read<TrackPlay[]>(K.trackplays, []);
+        if (logs.length || tracks.length) {
+          await api('playlog', { method: 'POST', body: JSON.stringify({ entries: logs, tracks }) });
+          // On ne retire que ce qui a été envoyé : ce qui est arrivé pendant l’envoi part au prochain signal.
+          write(K.logs, read<Log[]>(K.logs, []).slice(logs.length));
+          write(K.trackplays, read<TrackPlay[]>(K.trackplays, []).slice(tracks.length));
         }
       } catch {
         setOnline(false);
@@ -218,17 +236,20 @@ export function Player({ demo }: { demo: boolean }) {
   }, [token, demo, api]);
 
   // ───── Son ─────
-  const fade = async (to: number, ms = 800) => {
+  const baseVolume = () => Math.min(1, (scheduleRef.current?.store?.max_volume ?? 80) / 100);
+  /** Niveau de la musique, de 0 (coupée) à 1 (volume de la boutique). */
+  const duckTo = async (level: number, ms = 800) => {
+    if (engine.current) return engine.current.duck(level, ms);
     const a = music.current;
     if (!a) return;
     const from = a.volume;
+    const to = level * baseVolume();
     const steps = 16;
     for (let i = 1; i <= steps; i++) {
       a.volume = from + ((to - from) * i) / steps;
       await sleep(ms / steps);
     }
   };
-  const baseVolume = () => Math.min(1, (scheduleRef.current?.store?.max_volume ?? 80) / 100);
 
   const say = (text: string) =>
     new Promise<void>((resolve) => {
@@ -255,9 +276,14 @@ export function Player({ demo }: { demo: boolean }) {
   const playBreak = useCallback(async (items: ScheduledSpot[]) => {
     busy.current = true;
     const s = scheduleRef.current;
+    // Entre deux titres joués par le lecteur, la musique est déjà arrêtée : rien à baisser.
+    const between = engine.current != null && engine.current.state !== 'playing';
     const duck = s?.rules?.duck_music !== false;
-    if (duck) await fade(0.12);
-    else music.current?.pause();
+    if (!between) {
+      if (duck) await duckTo(0.15);
+      else if (engine.current) await duckTo(0, 300);
+      else music.current?.pause();
+    }
     for (const it of items) {
       const spot = s?.spots.find((x) => x.id === it.request.spotId);
       setOnAir({ title: it.request.title, origin: it.request.origin });
@@ -272,16 +298,95 @@ export function Player({ demo }: { demo: boolean }) {
       }
       const handled = new Set(read<string[]>(K.handled, []));
       handled.add(it.request.id);
-      write(K.handled, [...handled]);
+      write(K.handled, [...handled].filter((h) => h.endsWith(`#${midnight()}`)));
       write(K.history, [...read<PlayedSpot[]>(K.history, []), { spotId: it.request.spotId, at: Date.now(), durationSec: it.request.durationSec }].slice(-200));
       write(K.logs, [...read<Log[]>(K.logs, []), { spot_id: it.request.spotId, scheduled_for: new Date(it.request.requestedAt).toISOString(), played_at: new Date().toISOString(), status, reason }]);
       await sleep(400);
     }
     setOnAir(null);
-    if (duck) await fade(baseVolume());
-    else music.current?.play().catch(() => undefined);
+    if (!between) {
+      if (duck || engine.current) await duckTo(1);
+      else music.current?.play().catch(() => undefined);
+    }
     busy.current = false;
   }, []);
+
+  /** Que faut-il jouer maintenant, sachant qu’il reste `remaining` secondes au titre en cours ? */
+  const decideNow = useCallback((remaining: number | null): Decision | null => {
+    const s = scheduleRef.current;
+    if (!s) return null;
+    const day = midnight();
+    const handled = new Set(read<string[]>(K.handled, []).filter((h) => h.endsWith(`#${day}`)));
+    const tracks = s.music?.tracks ?? [];
+    const d = decide({
+      now: Date.now(),
+      trackRemainingSec: remaining,
+      // Ce qui devait passer avant l’allumage du lecteur n’est pas compté comme manqué.
+      requests: buildRequests(s.spots, day).filter((r) => r.requestedAt + (r.windowMin ?? toRules(s.rules).windowMin) * 60_000 >= startedAt.current),
+      rules: toRules(s.rules),
+      history: read<PlayedSpot[]>(K.history, []),
+      handled,
+      avgTrackSec: engine.current && tracks.length ? tracks.reduce((a, t) => a + t.cue_out - t.cue_in, 0) / tracks.length : undefined
+    });
+    if (d.missed.length) {
+      for (const m of d.missed) handled.add(m.request.id);
+      write(K.handled, [...handled]);
+      write(K.logs, [...read<Log[]>(K.logs, []), ...d.missed.map((m) => ({ spot_id: m.request.spotId, scheduled_for: new Date(m.request.requestedAt).toISOString(), status: 'missed' as const, reason: m.reason }))]);
+    }
+    return d;
+  }, []);
+
+  // ───── Musique jouée par le lecteur (bibliothèque Onde) ─────
+  const hasMusic = (s: Schedule | null) => Boolean(s?.music?.tracks.some((t) => t.url) && s.music.playlists.some((p) => p.trackIds.length));
+
+  const startEngine = useCallback(
+    (s: Schedule) => {
+      const e = new MusicEngine({
+        onTrackStart: (t: TrackStart) => {
+          outputLufs.current = t.outputLufs;
+          if (t.isJingle) return; // les jingles ne figurent pas dans l’historique des titres
+          const play: TrackPlay = {
+            track_id: t.track.id,
+            playlist_id: t.playlistId,
+            title: t.track.title,
+            artist: t.track.artist,
+            isrc: t.track.isrc,
+            played_at: new Date().toISOString(),
+            duration_sec: Math.round((t.track.cue_out - t.track.cue_in) * 10) / 10
+          };
+          write(K.trackplays, [...read<TrackPlay[]>(K.trackplays, []), play].slice(-2000));
+        },
+        breakDue: (rem) => {
+          const d = decideNow(rem);
+          return Boolean(d?.next && d.next.kind === 'between_tracks' && d.next.at <= Date.now() + rem * 1000 + 1500);
+        },
+        runBreak: async () => {
+          while (busy.current) await sleep(200);
+          const d = decideNow(0);
+          if (d?.play.length) await playBreak(d.play);
+        },
+        isBusy: () => busy.current
+      });
+      e.setSchedule(s.music!, s.store?.timezone ?? null);
+      e.setBaseVolume(baseVolume());
+      engine.current = e;
+      music.current?.pause();
+      void e.start();
+    },
+    [decideNow, playBreak]
+  );
+
+  // Programme mis à jour : nouveaux titres, volume ; bascule sur la bibliothèque dès qu’elle a de quoi jouer.
+  useEffect(() => {
+    if (!started || !schedule || demo) return;
+    const e = engine.current;
+    if (e) {
+      if (schedule.music) e.setSchedule(schedule.music, schedule.store?.timezone ?? null);
+      e.setBaseVolume(baseVolume());
+    } else if (hasMusic(schedule)) startEngine(schedule);
+  }, [schedule, started, demo, startEngine]);
+
+  useEffect(() => () => engine.current?.stop(), []);
 
   // ───── Urgence : passe tout de suite, une fois ─────
   useEffect(() => {
@@ -290,12 +395,12 @@ export function Player({ demo }: { demo: boolean }) {
     (async () => {
       busy.current = true;
       speechSynthesis?.cancel();
-      await fade(0, 300);
+      await duckTo(0, 300);
       setOnAir({ title: 'Annonce d’urgence', origin: 'emergency' });
       await say(emergency.text);
       await say(emergency.text);
       setOnAir(null);
-      await fade(baseVolume());
+      await duckTo(1);
       busy.current = false;
     })();
   }, [emergency, started]);
@@ -305,32 +410,24 @@ export function Player({ demo }: { demo: boolean }) {
     if (!started) return;
     const id = setInterval(() => {
       setClock(Date.now());
-      const s = scheduleRef.current;
-      if (!s || busy.current) return;
-      const day = midnight();
-      const handledList = read<string[]>(K.handled, []).filter((h) => h.endsWith(`#${day}`));
-      const handled = new Set(handledList);
-      const cur = npRef.current;
-      const remaining = cur ? cur.remaining - (Date.now() - cur.at) / 1000 : null;
-      const d = decide({
-        now: Date.now(),
-        trackRemainingSec: remaining,
-        // Ce qui devait passer avant l’allumage du lecteur n’est pas compté comme manqué.
-        requests: buildRequests(s.spots, day).filter((r) => r.requestedAt + (r.windowMin ?? toRules(s.rules).windowMin) * 60_000 >= startedAt.current),
-        rules: toRules(s.rules),
-        history: read<PlayedSpot[]>(K.history, []),
-        handled
-      });
-      if (d.missed.length) {
-        for (const m of d.missed) handled.add(m.request.id);
-        write(K.handled, [...handled]);
-        write(K.logs, [...read<Log[]>(K.logs, []), ...d.missed.map((m) => ({ spot_id: m.request.spotId, scheduled_for: new Date(m.request.requestedAt).toISOString(), status: 'missed' as const, reason: m.reason }))]);
+      const e = engine.current;
+      if (e) {
+        const n = e.nowPlaying();
+        setNp(n ? { title: n.title, artist: n.artist, ambience: n.ambience, daypart: n.daypart, position: n.position, length: n.length, remaining: e.remaining() ?? 0, at: Date.now() } : null);
       }
+      if (!scheduleRef.current || busy.current) return;
+      const cur = npRef.current;
+      const remaining = e ? e.remaining() : cur ? cur.remaining - (Date.now() - cur.at) / 1000 : null;
+      const d = decideNow(remaining);
+      if (!d) return;
       setNext(d.next ? { at: d.next.at, titles: d.next.items.map((i) => i.request.title) } : null);
-      if (d.play.length) playBreak(d.play);
+      if (!d.play.length) return;
+      // Musique jouée par le lecteur : l’écran entre deux titres est lancé par le moteur, au point de sortie.
+      if (e && d.kind === 'between_tracks' && e.state !== 'idle') return;
+      playBreak(d.play);
     }, 1000);
     return () => clearInterval(id);
-  }, [started, playBreak]);
+  }, [started, playBreak, decideNow]);
 
   // ───── Écran toujours allumé ─────
   useEffect(() => {
@@ -354,21 +451,24 @@ export function Player({ demo }: { demo: boolean }) {
 
   const start = async () => {
     startedAt.current = Date.now();
-    setStarted(true);
-    const a = music.current;
-    if (a && schedule?.stream?.url) {
-      a.src = schedule.stream.url;
-      a.volume = baseVolume();
-      await a.play().catch(() => undefined);
+    if (!demo && schedule && hasMusic(schedule)) startEngine(schedule);
+    else {
+      const a = music.current;
+      if (a && schedule?.stream?.url) {
+        a.src = schedule.stream.url;
+        a.volume = baseVolume();
+        await a.play().catch(() => undefined);
+      }
     }
+    setStarted(true);
     document.documentElement.requestFullscreen?.().catch(() => undefined);
   };
 
   const onMusicError = () => {
     const url = scheduleRef.current?.stream?.url;
-    if (!url || !music.current) return;
+    if (!url || !music.current || engine.current) return;
     setTimeout(() => {
-      if (!music.current) return;
+      if (!music.current || engine.current) return;
       music.current.src = `${url}${url.includes('?') ? '&' : '?'}r=${Date.now()}`;
       music.current.play().catch(() => undefined);
     }, 5000);
@@ -426,9 +526,16 @@ export function Player({ demo }: { demo: boolean }) {
             </section>
           ) : (
             <section aria-live="polite">
-              <div className="lp-label">{schedule?.stream?.name ? `Ambiance ${schedule.stream.name}` : 'En cours'}</div>
-              <div className="lp-title">{np?.title ?? (schedule?.stream?.url ? 'Lecture en cours' : 'Aucun flux configuré')}</div>
+              <div className="lp-label">
+                {np?.ambience ? `Ambiance ${np.ambience}${np.daypart ? ` · ${np.daypart}` : ''}` : schedule?.stream?.name ? `Ambiance ${schedule.stream.name}` : 'En cours'}
+              </div>
+              <div className="lp-title">{np?.title ?? (hasMusic(schedule) || schedule?.stream?.url ? 'Lecture en cours' : 'Aucune musique programmée')}</div>
               <div className="lp-artist">{np?.artist ?? ''}</div>
+              {np?.length ? (
+                <div className="lp-progress" role="progressbar" aria-label="Avancement du titre" aria-valuemin={0} aria-valuemax={Math.round(np.length)} aria-valuenow={Math.round(np.position ?? 0)}>
+                  <div style={{ width: `${Math.min(100, ((np.position ?? 0) / np.length) * 100)}%` }} />
+                </div>
+              ) : null}
             </section>
           )}
           <section className="lp-next">

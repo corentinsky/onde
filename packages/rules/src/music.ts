@@ -287,6 +287,26 @@ export function localTime(date: Date): LocalTime {
   };
 }
 
+/** Heure locale d’une boutique, quel que soit le fuseau de l’appareil (ex. « Europe/Paris »). */
+export function localTimeIn(date: Date, timeZone: string | null | undefined): LocalTime {
+  if (!timeZone) return localTime(date);
+  try {
+    const parts = Object.fromEntries(
+      new Intl.DateTimeFormat('en-GB', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', weekday: 'short', hourCycle: 'h23' })
+        .formatToParts(date)
+        .map((p) => [p.type, p.value])
+    );
+    const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    return {
+      minuteOfDay: Number(parts.hour) * 60 + Number(parts.minute),
+      dayOfWeek: days.indexOf(parts.weekday) + 1,
+      date: `${parts.year}-${parts.month}-${parts.day}`
+    };
+  } catch {
+    return localTime(date);
+  }
+}
+
 /** Générateur pseudo-aléatoire reproductible (tests, aperçu de la régie). */
 export function seededRng(seed: number): () => number {
   let a = seed >>> 0;

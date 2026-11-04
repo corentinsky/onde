@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ambienceAt, emptyRotation, localTime, nextTrack, previewQueue, scheduleActive, seededRng, type Playlist, type PlayedTrack, type TrackMeta } from '../src/music';
+import { ambienceAt, emptyRotation, localTime, localTimeIn, nextTrack, previewQueue, scheduleActive, seededRng, type Playlist, type PlayedTrack, type TrackMeta } from '../src/music';
 
 const MIN = 60_000;
 const lib = (n: number, artistOf = (i: number) => `Artiste ${i}`): Map<string, TrackMeta> =>
@@ -129,5 +129,22 @@ describe('aperçu', () => {
     const q = previewQueue({ playlists: [pl({ id: 'a', trackIds: [...tracks.keys()] })], tracks, history: [], start: new Date(T0), count: 5, rng: seededRng(2) });
     expect(q).toHaveLength(5);
     expect(q[1].at - q[0].at).toBe(210_000);
+  });
+});
+
+describe('fuseau de la boutique', () => {
+  it('donne l’heure de Paris même si l’appareil est ailleurs', () => {
+    // 4 novembre 2026, 23 h 30 UTC = jeudi 5 novembre, 0 h 30 à Paris (UTC+1).
+    const t = localTimeIn(new Date('2026-11-04T23:30:00Z'), 'Europe/Paris');
+    expect(t).toEqual({ minuteOfDay: 30, dayOfWeek: 4, date: '2026-11-05' });
+  });
+  it('gère l’heure d’été', () => {
+    const t = localTimeIn(new Date('2026-07-01T08:00:00Z'), 'Europe/Paris');
+    expect(t.minuteOfDay).toBe(10 * 60);
+    expect(t.dayOfWeek).toBe(3);
+  });
+  it('fuseau inconnu : heure de l’appareil', () => {
+    const d = new Date('2026-07-01T08:00:00Z');
+    expect(localTimeIn(d, 'Pas/UnFuseau')).toEqual(localTime(d));
   });
 });
