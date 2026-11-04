@@ -22,6 +22,12 @@ export async function sendLink(form: FormData) {
     email,
     options: { shouldCreateUser: false, emailRedirectTo: `${origin}/auth/confirm?next=${encodeURIComponent(safeNext)}` }
   });
-  if (error) redirect(`/login?error=${encodeURIComponent('Adresse inconnue ou envoi impossible. Demandez une invitation à la régie.')}`);
+  if (error) {
+    const message =
+      error.code === 'over_email_send_rate_limit' || error.status === 429
+        ? 'Trop de liens demandés récemment. Réessayez dans une heure.'
+        : 'Adresse inconnue ou envoi impossible. Demandez une invitation à la régie.';
+    redirect(`/login?error=${encodeURIComponent(message)}`);
+  }
   redirect('/login?sent=1');
 }
