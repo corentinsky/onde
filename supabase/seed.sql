@@ -63,3 +63,15 @@ insert into public.incidents (org_id, store_id, device_id, kind, details, starte
   ('a0000000-0000-4000-8000-000000000001', 'c0000000-0000-4000-8000-000000000006', 'd0000000-0000-4000-8000-000000000006', 'offline', 'Boutique hors ligne. Le lecteur joue sa musique en avance.', now() - interval '2 hours'),
   ('a0000000-0000-4000-8000-000000000001', 'c0000000-0000-4000-8000-000000000005', 'd0000000-0000-4000-8000-000000000005', 'offline', 'Connexion instable, reconnexion en cours.', now() - interval '6 minutes'),
   ('a0000000-0000-4000-8000-000000000001', 'c0000000-0000-4000-8000-000000000004', 'd0000000-0000-4000-8000-000000000004', 'volume', 'Le niveau dépasse de 9 dB le plafond fixé par le siège.', now() - interval '4 minutes');
+
+-- Musique : une rotation par ambiance (créée par la migration en production) et une journée type.
+insert into public.playlists (org_id, ambience_id, name)
+select org_id, id, 'Rotation principale' from public.ambiences
+where not exists (select 1 from public.playlists p where p.ambience_id = ambiences.id);
+
+insert into public.dayparts (org_id, name, ambience_id, start_time, end_time, position)
+select 'a0000000-0000-4000-8000-000000000001', d.name, a.id, d.s::time, d.e::time, d.pos
+from (values ('Ouverture', 'Soft', '09:30', '11:00', 1), ('Matinée', 'Signature', '11:00', '13:00', 2),
+             ('Déjeuner', 'Énergie', '13:00', '15:00', 3), ('Après-midi', 'Signature', '15:00', '17:30', 4),
+             ('Fin de journée', 'Soft', '17:30', '21:00', 5)) as d(name, amb, s, e, pos)
+join public.ambiences a on a.org_id = 'a0000000-0000-4000-8000-000000000001' and a.name = d.amb;

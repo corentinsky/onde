@@ -100,3 +100,44 @@ select set_config('request.jwt.claim.sub', '', false);
 set role anon;
 select pg_temp.check((select count(*) from public.stores) = 0, 'un visiteur anonyme ne voit rien');
 reset role;
+
+-- ───── Musique ─────
+select pg_temp.as_user('f0000000-0000-4000-8000-000000000001');
+insert into public.tracks (id, storage_path, file_name, title, artist, duration_sec, cue_in, cue_out, cross_start)
+values ('70000000-0000-4000-8000-000000000001', 'test/a.mp3', 'a.mp3', 'Velvet Hours', 'Nuits Blanches', 200, 0.4, 198, 194) returning id;
+insert into public.playlist_tracks (playlist_id, track_id)
+select id, '70000000-0000-4000-8000-000000000001' from public.playlists where org_id = 'a0000000-0000-4000-8000-000000000001' limit 1;
+select pg_temp.check((select count(*) from public.playlists) = 4, 'la régie voit les listes de toutes les enseignes');
+select pg_temp.check((select count(*) from public.dayparts) = 5, 'la journée type de démo est chargée');
+reset role;
+
+select pg_temp.as_user('f0000000-0000-4000-8000-000000000002');
+select pg_temp.check((select count(*) from public.tracks) = 1, 'le siège voit la bibliothèque commune');
+select pg_temp.check((select count(*) from public.playlists) = 3, 'le siège voit les listes de son enseigne seulement');
+do $$ begin
+  begin
+    insert into public.tracks (storage_path, file_name, duration_sec, cue_out, cross_start) values ('x', 'x', 10, 9, 9);
+    raise exception 'ÉCHEC : le siège a pu ajouter un titre à la bibliothèque';
+  exception when insufficient_privilege then raise notice 'ok : seule la régie gère la bibliothèque';
+  end;
+end $$;
+reset role;
+
+select pg_temp.as_user('f0000000-0000-4000-8000-000000000004');
+select pg_temp.check((select count(*) from public.tracks) = 1, 'une autre enseigne voit aussi la bibliothèque commune');
+select pg_temp.check((select count(*) from public.playlists) = 1, 'une autre enseigne ne voit pas les listes Aubert');
+select pg_temp.check((select count(*) from public.playlist_tracks) = 0, 'ni leur contenu');
+reset role;
+
+do $$ begin
+  begin
+    insert into public.tracks (storage_path, file_name, duration_sec, cue_in, cue_out, cross_start) values ('bad', 'bad', 100, 50, 40, 45);
+    raise exception 'ÉCHEC : des points de mix incohérents ont été acceptés';
+  exception when check_violation then raise notice 'ok : points de mix incohérents refusés';
+  end;
+end $$;
+
+select set_config('request.jwt.claim.sub', '', false);
+set role anon;
+select pg_temp.check((select count(*) from public.tracks) = 0, 'un visiteur anonyme ne voit pas la bibliothèque');
+reset role;
