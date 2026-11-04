@@ -14,6 +14,14 @@ export default async function Programmation() {
   const name = new Map(ambiences.map((a) => [a.id, a.name]));
   const fallback = ambiences[0]?.name ?? '—';
   const pct = (m: number) => `${(m / 1440) * 100}%`;
+  if (!ambiences.length) {
+    return (
+      <>
+        <div className="page-head"><div><div className="eyebrow">{org.name}</div><h1>Journée type</h1></div></div>
+        <div className="card empty">Aucune ambiance pour cette enseigne : la journée type se règle une fois les ambiances créées.</div>
+      </>
+    );
+  }
 
   const Row = ({ d }: { d?: (typeof dayparts)[number] }) => (
     <form action={saveDaypart} className="form-grid" style={{ alignItems: 'end', padding: '14px 0', borderTop: '1px solid var(--line)', gridTemplateColumns: 'minmax(140px,1.3fr) minmax(140px,1fr) 110px 110px minmax(260px,2fr) auto' }}>

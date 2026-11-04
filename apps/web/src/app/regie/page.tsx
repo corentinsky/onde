@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { getSession, listIncidents, listSpots, listStoreStatus } from '@/lib/data';
-import { ago, incidentLabel } from '@/lib/format';
+import { ago, incidentLabel, spotState } from '@/lib/format';
 import { EMITTER_ONLINE_MS } from '@/lib/stream';
 import { isConfigured, supabaseService } from '@/lib/supabase/server';
 
@@ -35,7 +35,7 @@ export default async function Overview() {
     antenne(org.id)
   ]);
   const online = stores.filter((s) => s.status === 'online').length;
-  const active = spots.filter((s) => s.status === 'approved' && s.origin !== 'store').length;
+  const active = spots.filter((s) => spotState(s).live && s.origin !== 'store').length;
 
   return (
     <>

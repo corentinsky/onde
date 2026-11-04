@@ -23,7 +23,11 @@ const fr: Record<string, string> = {
   old: 'senior',
   french: 'accent français',
   american: 'accent américain',
-  british: 'accent britannique'
+  british: 'accent britannique',
+  australian: 'accent australien',
+  irish: 'accent irlandais',
+  canadian: 'accent canadien',
+  standard: 'accent standard'
 };
 const t = (s?: string) => (s ? (/^fr([-_]|$)|french|parisian/i.test(s) ? 'accent français' : (fr[s.toLowerCase()] ?? s)) : '');
 const isFrench = (v: Voice) => v.description.includes('accent français');

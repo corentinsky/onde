@@ -1,5 +1,5 @@
 import { getSession, listSpots, listStoreStatus } from '@/lib/data';
-import { frequency, statusLabel } from '@/lib/format';
+import { frequency, period, spotState } from '@/lib/format';
 import { isConfigured, supabaseServer } from '@/lib/supabase/server';
 import { listVoices, voiceConfigured } from '@/lib/voice';
 import { createSpot, setSpotStatus, startEmergency, stopEmergency, toggleHqSpots } from '../actions';
@@ -101,14 +101,14 @@ export default async function Spots() {
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontWeight: 600 }}>{s.title}</div>
                   <div className="small muted">
-                    {s.target} · {frequency(s)} · {s.duration_sec} s · {s.audio_kind === 'ai' ? `voix IA${s.voice_name ? ` (${s.voice_name})` : ''}` : s.audio_path ? 'fichier' : 'texte seul'}
+                    {s.target} · {frequency(s)} · {period(s)} · {s.duration_sec} s · {s.audio_kind === 'ai' ? `voix IA${s.voice_name ? ` (${s.voice_name})` : ''}` : s.audio_path ? 'fichier' : 'texte seul'}
                   </div>
                   {s.script && <div className="small" style={{ marginTop: 6 }}>{s.script}</div>}
                   {s.audio_path && spotUrl.get(s.audio_path) && <audio controls preload="none" src={spotUrl.get(s.audio_path) ?? undefined} style={{ marginTop: 8, height: 32, maxWidth: '100%' }} aria-label={`Écouter ${s.title}`} />}
                 </div>
                 <div className="actions" style={{ flex: '0 0 auto' }}>
-                  <span className="tag">{statusLabel[s.status]}</span>
-                  {s.status === 'approved' || s.status === 'paused' ? (
+                  <span className="tag">{spotState(s).label}</span>
+                  {(s.status === 'approved' || s.status === 'paused') && spotState(s).key !== 'ended' ? (
                     <form action={setSpotStatus}>
                       <input type="hidden" name="id" value={s.id} />
                       <input type="hidden" name="status" value={s.status === 'approved' ? 'paused' : 'approved'} />
