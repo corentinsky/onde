@@ -10,8 +10,8 @@
   "scripts": {
     "dev": "npm run dev -w @onde/web",
     "build": "npm run build -w @onde/web",
-    "test": "npm run test -w @onde/rules",
-    "typecheck": "npm run typecheck -w @onde/rules && npm run typecheck -w @onde/web",
+    "test": "npm run test -w @onde/rules && npm run test -w @onde/audio",
+    "typecheck": "npm run typecheck -w @onde/rules && npm run typecheck -w @onde/audio && npm run typecheck -w @onde/web",
     "db:test": "node supabase/tests/run.mjs"
   },
   "engines": {
