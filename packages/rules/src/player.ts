@@ -113,10 +113,16 @@ export function decide(input: DecideInput): Decision {
   const missed = plan.missed.filter((m) => now > m.request.requestedAt + (m.request.windowMin ?? rules.windowMin) * MIN);
   const first = plan.breaks[0] ?? null;
   const due = first && first.at <= now + tolerance;
+  // Titre en cours inconnu : les durées de titres sont des estimations, on affiche
+  // donc l’heure réellement demandée plutôt qu’un écran projeté.
+  const next =
+    first && remaining == null && first.kind === 'between_tracks'
+      ? { ...first, at: Math.max(now, Math.min(...first.items.map((i) => i.request.requestedAt))) }
+      : first;
   return {
     play: due ? first.items : [],
     kind: due ? first.kind : null,
     missed,
-    next: first
+    next
   };
 }

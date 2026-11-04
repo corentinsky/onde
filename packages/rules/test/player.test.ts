@@ -76,4 +76,10 @@ describe('decide', () => {
     expect(d.kind).toBe('sync');
     expect(d.play).toHaveLength(1);
   });
+
+  it('annonce l’heure demandée quand le titre en cours est inconnu', () => {
+    const d = decide({ ...base, now: at(10, 57), trackRemainingSec: null });
+    expect(d.play).toEqual([]);
+    expect(d.next?.at).toBe(at(11));
+  });
 });
