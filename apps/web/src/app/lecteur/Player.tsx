@@ -87,6 +87,7 @@ export function Player({ demo }: { demo: boolean }) {
 
   const music = useRef<HTMLAudioElement | null>(null);
   const busy = useRef(false);
+  const startedAt = useRef(0);
   const scheduleRef = useRef<Schedule | null>(null);
   const npRef = useRef<NP | null>(null);
   scheduleRef.current = schedule;
@@ -311,7 +312,8 @@ export function Player({ demo }: { demo: boolean }) {
       const d = decide({
         now: Date.now(),
         trackRemainingSec: remaining,
-        requests: buildRequests(s.spots, day),
+        // Ce qui devait passer avant l’allumage du lecteur n’est pas compté comme manqué.
+        requests: buildRequests(s.spots, day).filter((r) => r.requestedAt + (r.windowMin ?? toRules(s.rules).windowMin) * 60_000 >= startedAt.current),
         rules: toRules(s.rules),
         history: read<PlayedSpot[]>(K.history, []),
         handled
@@ -348,6 +350,7 @@ export function Player({ demo }: { demo: boolean }) {
   }, [started]);
 
   const start = async () => {
+    startedAt.current = Date.now();
     setStarted(true);
     const a = music.current;
     if (a && schedule?.stream?.url) {
