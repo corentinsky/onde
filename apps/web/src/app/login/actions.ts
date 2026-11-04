@@ -3,7 +3,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
-import { supabaseAnonKey, supabaseUrl } from '@/lib/supabase/server';
+import { supabaseAnonKey, supabaseServer, supabaseUrl } from '@/lib/supabase/server';
 
 export async function sendLink(form: FormData) {
   const email = String(form.get('email') ?? '').trim();
@@ -30,4 +30,18 @@ export async function sendLink(form: FormData) {
     redirect(`/login?error=${encodeURIComponent(message)}`);
   }
   redirect('/login?sent=1');
+}
+
+export async function signInPassword(form: FormData) {
+  const email = String(form.get('email') ?? '').trim();
+  const password = String(form.get('password') ?? '');
+  const next = String(form.get('next') ?? '/regie');
+  const safeNext = next.startsWith('/') && !next.startsWith('//') ? next : '/regie';
+  const sb = await supabaseServer();
+  const { error } = await sb.auth.signInWithPassword({ email, password });
+  if (error) {
+    const message = error.status === 429 ? 'Trop de tentatives. Patientez quelques minutes.' : 'Adresse ou mot de passe incorrect.';
+    redirect(`/login?error=${encodeURIComponent(message)}&next=${encodeURIComponent(safeNext)}`);
+  }
+  redirect(safeNext);
 }

@@ -1,13 +1,17 @@
 import { redirect } from 'next/navigation';
 import { isConfigured } from '@/lib/supabase/server';
-import { sendLink } from './actions';
+import { sendLink, signInPassword } from './actions';
 
 export const metadata = { title: 'Connexion' };
 export const dynamic = 'force-dynamic';
 
-export default async function Login({ searchParams }: { searchParams: Promise<{ sent?: string; error?: string; next?: string }> }) {
+export default async function Login({ searchParams }: { searchParams: Promise<{ sent?: string; error?: string; next?: string; mode?: string }> }) {
   if (!isConfigured) redirect('/regie');
-  const { sent, error, next } = await searchParams;
+  const { sent, error, next, mode } = await searchParams;
+  const withLink = mode === 'lien';
+  const nextValue = next ?? '/regie';
+  const switchHref = `/login?${new URLSearchParams({ ...(withLink ? {} : { mode: 'lien' }), next: nextValue }).toString()}`;
+
   return (
     <div className="auth">
       <div className="card">
@@ -19,16 +23,25 @@ export default async function Login({ searchParams }: { searchParams: Promise<{ 
         </div>
         <h1 style={{ fontSize: 28, marginTop: 24 }}>Connexion</h1>
         {sent ? (
-          <p className="lead">Un lien de connexion vient de partir. Ouvrez-le depuis cet appareil.</p>
+          <p className="lead">Un lien de connexion vient de partir. Il marche aussi depuis votre téléphone.</p>
         ) : (
-          <form action={sendLink} style={{ display: 'flex', flexDirection: 'column', gap: 14, marginTop: 20 }}>
-            <input type="hidden" name="next" value={next ?? '/regie'} />
+          <form action={withLink ? sendLink : signInPassword} style={{ display: 'flex', flexDirection: 'column', gap: 14, marginTop: 20 }}>
+            <input type="hidden" name="next" value={nextValue} />
             <label className="field">
               <span>Adresse e-mail professionnelle</span>
               <input className="input" type="email" name="email" required autoComplete="email" />
             </label>
+            {!withLink && (
+              <label className="field">
+                <span>Mot de passe</span>
+                <input className="input" type="password" name="password" required autoComplete="current-password" />
+              </label>
+            )}
             {error && <div className="notice" role="alert">{error}</div>}
-            <button className="btn btn-primary" type="submit">Recevoir un lien</button>
+            <button className="btn btn-primary" type="submit">{withLink ? 'Recevoir un lien' : 'Se connecter'}</button>
+            <a href={switchHref} className="small" style={{ alignSelf: 'center' }}>
+              {withLink ? 'Se connecter avec un mot de passe' : 'Recevoir plutôt un lien par e-mail'}
+            </a>
           </form>
         )}
       </div>
