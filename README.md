@@ -30,6 +30,12 @@ DATABASE_URL=postgres://postgres:postgres@localhost:5432/onde npm run db:test
 
 Configuration : copier `apps/web/.env.example` en `apps/web/.env.local`.
 
+## En ligne
+
+- Application : https://onde-rust.vercel.app (Vercel, déploiement automatique à chaque envoi sur `main`)
+- Base : projet Supabase `onde`, région Paris (schéma et données de démo chargés)
+- Lecteur boutique : https://onde-rust.vercel.app/lecteur
+
 ## État
 
 - [x] Moteur de règles + tests
@@ -37,5 +43,6 @@ Configuration : copier `apps/web/.env.example` en `apps/web/.env.local`.
 - [x] Régie : vue d’ensemble, supervision, fiche boutique, spots nationaux, messages, règles
 - [x] API des lecteurs (appairage, signal de vie, programme, preuves)
 - [ ] Espaces siège et magasin
-- [ ] Lecteur boutique (page plein écran, puis boîtier)
+- [x] Lecteur boutique, version navigateur (pilote)
+- [ ] Lecteur boîtier avec musique en avance
 - [ ] Invitations, calendrier, rapport de campagne
