@@ -44,8 +44,12 @@ export async function listVoices(): Promise<{ voices: Voice[]; error: string | n
       if (res.status === 401) return { voices: [], error: 'Clé ElevenLabs refusée : vérifiez qu’elle est complète et active.' };
       return { voices: [], error: `ElevenLabs a répondu ${res.status}.` };
     }
-    const body = (await res.json()) as { voices?: { voice_id: string; name: string; labels?: Record<string, string>; preview_url?: string }[] };
+    const body = (await res.json()) as {
+      voices?: { voice_id: string; name: string; category?: string; labels?: Record<string, string>; preview_url?: string; fine_tuning?: { state?: Record<string, string> } }[];
+    };
     const voices = (body.voices ?? [])
+      // Voix « professionnelle » dont l’entraînement n’est pas terminé : ElevenLabs la refuse.
+      .filter((v) => !(v.category === 'professional' && v.fine_tuning?.state && !Object.values(v.fine_tuning.state).includes('fine_tuned')))
       .map((v) => ({
         id: v.voice_id,
         name: v.name.split(/\s[-–]\s/)[0],
