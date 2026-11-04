@@ -5,28 +5,28 @@
   Régie, siège,  │  apps/web (Next.js)                                            │
   magasin  ───▶  │   • écrans (connexion Supabase Auth)                           │
   (navigateur)   │   • dépôt des morceaux : analyse dans le navigateur (@onde/audio)│
-                 │   • actions serveur → Supabase avec la session de l’utilisateur │
-                 │   • /api/device/* → Supabase avec la clé de service           │
-                 └───────────────┬────────────────────────────────────────────────┘
-                                 │
-                     ┌───────────▼──────────────────────────────┐
-                     │ Supabase                                  │
-                     │ Postgres : sociétés, boutiques, spots,    │
-                     │ règles, bibliothèque, listes, journée     │
-                     │ type, preuves, titres joués, incidents    │
-                     │ Stockage : spots/ et music/ (privés)      │
-                     └───────────▲──────────────────────────────┘
-                                 │ jeton du lecteur, liens signés 24 h
-                     ┌───────────┴──────────────────────────────────────────────┐
-                     │ Lecteur boutique : choisit chaque titre (@onde/rules),    │
-                     │ normalise, enchaîne aux points de mix, garde la musique   │
-                     │ en cache, insère les spots entre deux titres, envoie      │
-                     │ signal de vie, preuves et titres joués                    │
-                     └──────────────────────────────────────────────────────────┘
+                 │   • /api/emitter/* → choix de chaque titre du flux             │
+                 │   • /api/device/*  → programme, preuves des lecteurs           │
+                 └──────┬──────────────────────────────┬──────────────────────────┘
+                        │                              │ titre suivant (annoté)
+            ┌───────────▼─────────────┐     ┌──────────▼──────────────────────────┐
+            │ Supabase                 │     │ Émetteur (infra/emetteur, Docker)   │
+            │ enseignes, boutiques,    │     │ Liquidsoap : enchaînements, volume  │
+            │ spots, bibliothèque,     │     │ Icecast + nginx : un flux par       │
+            │ listes, journée type,    │     │ enseigne, titres annoncés dans le   │
+            │ flux, preuves, titres    │     │ flux                                │
+            └───────────▲─────────────┘     └──────────┬──────────────────────────┘
+                        │ jeton du lecteur             │ flux MP3 + métadonnées
+            ┌───────────┴──────────────────────────────▼──────────────────────────┐
+            │ Lecteur boutique : écoute le flux de l’enseigne avec 8 s d’avance,   │
+            │ place ses spots entre deux titres (pause, spots, reprise au titre    │
+            │ suivant), joue la musique en cache si le flux coupe, envoie signal   │
+            │ de vie, preuves et titres joués                                     │
+            └──────────────────────────────────────────────────────────────────────┘
 ```
 
-AzuraCast reste possible pour une ambiance diffusée en flux (`ambiences.stream_url`) : le lecteur
-le joue alors tel quel. Sans flux ni bibliothèque, il n’y a pas de musique.
+Un flux externe (AzuraCast…) reste possible pour une ambiance (`ambiences.stream_url`) : le lecteur le joue
+tel quel, sans repérage exact des titres.
 
 ## Principes
 
@@ -52,8 +52,31 @@ le joue alors tel quel. Sans flux ni bibliothèque, il n’y a pas de musique.
 | `POST /api/device/heartbeat` | toutes les 30 s : titre, musique en avance, niveau de sortie |
 | `GET /api/device/schedule` | règles, spots du jour, zones, état du réseau, programmation musicale (titres, points de mix, liens signés 24 h) |
 | `POST /api/device/playlog` | `entries` : preuves de diffusion des spots ; `tracks` : titres joués |
+| `GET /api/device/nowplaying` | flux Onde : titres récents et à venir ; sinon titre en cours d’AzuraCast |
 
 Toutes les routes sauf `pair` exigent `Authorization: Bearer <jeton>`.
+
+## API de l’émetteur
+
+| Route | Rôle |
+|---|---|
+| `GET /api/emitter/config` | flux à diffuser (une ligne par enseigne) ; signal de vie, adresse publique |
+| `GET /api/emitter/next?org=` | titre suivant : `annotate:liq_cue_in,liq_cue_out,liq_cross_duration,liq_fade_in,liq_fade_out,liq_amplify…:onde:<ext>\|<lien signé>` |
+| `POST /api/emitter/started?play=` | le titre vient de démarrer (titre en cours, historique `stream_plays`) |
+
+Clé de l’émetteur (`Authorization: Bearer`), créée dans Régie → Émetteur, stockée hachée (`emitters`).
+
+## Spots magasin par magasin, sur un flux commun
+
+1. Le lecteur lit le flux par `fetch` (métadonnées ICY) et le joue via MediaSource avec **8 s de marge** :
+   chaque changement de titre est connu avant d’être entendu.
+2. Écran dû (`packages/rules`) : au changement de titre, fondu, **pause du flux**, spots de la boutique,
+   puis **reprise au début du titre suivant**, sans le chevauchement de l’ancien titre.
+3. Le différé accumulé (quelques minutes par jour) est rattrapé en sautant au début d’un titre plus récent,
+   jamais en coupant un morceau.
+4. Spots « à la seconde » et urgences : la musique baisse par-dessus le flux, sans pause.
+5. Flux coupé plus de 10 s : la bibliothèque en cache prend l’antenne (mêmes règles) ; le flux reprend au
+   prochain enchaînement dès qu’il revient.
 
 ## Musique : l’équivalent d’AzuraCast, sans le direct
 
@@ -72,8 +95,9 @@ Toutes les routes sauf `pair` exigent `Authorization: Bearer <jeton>`.
 
 En plus : la **journée type** (`dayparts`) choisit l’ambiance selon l’heure de la boutique (fuseau de
 la boutique, pas de l’appareil) ; l’analyse se fait dans le navigateur au dépôt, sans serveur audio ;
-le lecteur garde les fichiers en cache et continue sans connexion ; un écran de spots dû en fin de
-titre suspend l’enchaînement : le titre finit, les spots passent, puis la musique reprend.
+le flux est fabriqué une fois par enseigne et partagé par toutes ses boutiques.
 
 Code : `packages/audio` (analyse, testée sur les signaux de référence EBU 3341), `packages/rules/src/music.ts`
-(choix du titre, testé), `apps/web/src/app/lecteur/MusicEngine.ts` (lecture Web Audio).
+(choix du titre, testé), `apps/web/src/lib/stream.ts` (titre suivant du flux), `infra/emetteur` (Liquidsoap),
+`apps/web/src/app/lecteur/StreamPlayer.ts` et `StreamDirector.ts` (écoute du flux, spots),
+`MusicEngine.ts` (musique en cache, secours).

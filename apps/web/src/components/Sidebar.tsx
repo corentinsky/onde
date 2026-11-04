@@ -27,7 +27,8 @@ const groups: { title: string; items: { href: string; label: string; badge?: boo
     items: [
       { href: '/regie/bibliotheque', label: 'Bibliothèque' },
       { href: '/regie/ambiances', label: 'Ambiances et listes' },
-      { href: '/regie/programmation', label: 'Journée type' }
+      { href: '/regie/programmation', label: 'Journée type' },
+      { href: '/regie/emetteur', label: 'Émetteur' }
     ]
   },
   {

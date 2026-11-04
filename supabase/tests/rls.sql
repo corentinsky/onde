@@ -141,3 +141,59 @@ select set_config('request.jwt.claim.sub', '', false);
 set role anon;
 select pg_temp.check((select count(*) from public.tracks) = 0, 'un visiteur anonyme ne voit pas la bibliothèque');
 reset role;
+
+-- ───────────── Flux par enseigne et émetteurs ─────────────
+insert into public.emitters (name, token_hash) values ('Émetteur test', 'hash-test');
+insert into public.streams (org_id, mount) values
+  ('a0000000-0000-4000-8000-000000000001', 'maison-aubert'),
+  ('a0000000-0000-4000-8000-000000000002', 'verne');
+insert into public.stream_plays (org_id, title, artist) values
+  ('a0000000-0000-4000-8000-000000000001', 'Titre Aubert', 'Artiste'),
+  ('a0000000-0000-4000-8000-000000000002', 'Titre Verne', 'Artiste');
+select pg_temp.check((select count(*) from public.audit_log where target_type = 'streams') = 2, 'la création des flux est journalisée');
+
+do $$ begin
+  begin
+    insert into public.streams (org_id, mount) values ('a0000000-0000-4000-8000-000000000001', 'Pas Valide!');
+    raise exception 'ÉCHEC : un point de montage invalide a été accepté';
+  exception when check_violation or unique_violation then raise notice 'ok : point de montage invalide refusé';
+  end;
+end $$;
+
+select pg_temp.as_user('f0000000-0000-4000-8000-000000000001');
+select pg_temp.check((select count(*) from public.emitters) = 1, 'la régie voit les émetteurs');
+select pg_temp.check((select count(*) from public.streams) = 2, 'la régie voit tous les flux');
+update public.streams set enabled = false where org_id = 'a0000000-0000-4000-8000-000000000002';
+select pg_temp.check((select count(*) from public.streams where not enabled) = 1, 'la régie peut couper un flux');
+reset role;
+
+select pg_temp.as_user('f0000000-0000-4000-8000-000000000002');
+select pg_temp.check((select count(*) from public.emitters) = 0, 'le siège ne voit pas les émetteurs (clés)');
+select pg_temp.check((select count(*) from public.streams) = 1, 'le siège voit le flux de son enseigne');
+select pg_temp.check((select count(*) from public.stream_plays) = 1, 'le siège voit l’historique de son flux seulement');
+update public.streams set enabled = false where org_id = 'a0000000-0000-4000-8000-000000000001';
+select pg_temp.check((select count(*) from public.streams where not enabled) = 0, 'le siège ne peut pas modifier le flux');
+do $$ begin
+  begin
+    insert into public.stream_plays (org_id, title) values ('a0000000-0000-4000-8000-000000000001', 'Faux');
+    raise exception 'ÉCHEC : le siège a pu écrire dans l’historique du flux';
+  exception when insufficient_privilege then raise notice 'ok : seul l’émetteur écrit l’historique du flux';
+  end;
+end $$;
+reset role;
+
+select pg_temp.as_user('f0000000-0000-4000-8000-000000000003');
+select pg_temp.check((select count(*) from public.streams) = 1, 'la boutique voit le flux de son enseigne');
+select pg_temp.check((select count(*) from public.emitters) = 0, 'la boutique ne voit pas les émetteurs');
+reset role;
+
+select pg_temp.as_user('f0000000-0000-4000-8000-000000000004');
+select pg_temp.check((select count(*) from public.stream_plays) = 1, 'une autre enseigne ne voit pas l’historique Aubert');
+select pg_temp.check((select count(*) from public.streams where org_id = 'a0000000-0000-4000-8000-000000000001') = 0, 'ni son flux');
+reset role;
+
+select set_config('request.jwt.claim.sub', '', false);
+set role anon;
+select pg_temp.check((select count(*) from public.streams) = 0, 'un visiteur anonyme ne voit aucun flux');
+select pg_temp.check((select count(*) from public.emitters) = 0, 'ni aucun émetteur');
+reset role;

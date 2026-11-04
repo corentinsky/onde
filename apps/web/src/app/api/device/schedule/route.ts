@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { localTimeIn } from '@onde/rules';
 import { allRows, chunks, inChunks } from '@/lib/batch';
 import { authDevice, storeStream } from '@/lib/device';
+import { ondeStreamUrl } from '@/lib/stream';
 import { supabaseService } from '@/lib/supabase/server';
 
 /** Tout ce dont le lecteur a besoin pour jouer seul, même hors connexion : règles, spots, flux. */
@@ -43,7 +44,9 @@ export async function GET(req: NextRequest) {
       return { ...s, audio_url: data?.signedUrl ?? null };
     })
   );
-  const [stream, music] = await Promise.all([storeStream(sb, ctx.orgId, ctx.storeId), musicFor(sb, ctx.orgId, ctx.storeId)]);
+  // Flux de l’enseigne (émetteur Onde) en priorité, sinon un flux externe ; la bibliothèque sert de secours.
+  const [onde, external, music] = await Promise.all([ondeStreamUrl(sb, ctx.orgId), storeStream(sb, ctx.orgId, ctx.storeId), musicFor(sb, ctx.orgId, ctx.storeId)]);
+  const stream = onde ? { ...onde, kind: 'onde' as const } : external?.url ? { name: external.name, url: external.url, kind: 'external' as const } : null;
 
   return NextResponse.json({ generated_at: new Date().toISOString(), store, rules, org, stream, spots: withAudio, zones: zones ?? [], music });
 }

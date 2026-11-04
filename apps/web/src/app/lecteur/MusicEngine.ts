@@ -165,7 +165,8 @@ export class MusicEngine {
     if (this.current?.el.paused && this.current.started) await this.current.el.play().catch(() => undefined);
   }
 
-  stop() {
+  /** Arrête la lecture mais garde le cache et le contexte audio : prêt à reprendre en secours. */
+  standby() {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
     this.dispose(this.current);
@@ -173,8 +174,30 @@ export class MusicEngine {
     this.outgoing.clear();
     this.dropUpcoming();
     this.current = null;
+    this.holding = false;
+    this.ending = null;
+    this.yieldCb = null;
+  }
+
+  get running() {
+    return this.timer != null;
+  }
+
+  stop() {
+    this.standby();
     void this.ctx.close();
   }
+
+  /** Rend l’antenne au prochain enchaînement (retour du flux) : le titre finit son fondu, puis `cb`. */
+  yieldAtNextBoundary(cb: () => void) {
+    if (!this.current) {
+      this.standby();
+      cb();
+      return;
+    }
+    this.yieldCb = cb;
+  }
+  private yieldCb: (() => void) | null = null;
 
   private setBlocked(v: boolean) {
     if (this.blocked === v) return;
@@ -475,6 +498,18 @@ export class MusicEngine {
       // Point d’enchaînement : le titre suivant démarre pendant le fondu de sortie…
       if (!c.mixed && t >= c.mix.crossStart) {
         c.mixed = true;
+        // …ou l’antenne revient au flux : ce titre finit son fondu, le flux prend le relais.
+        if (this.yieldCb) {
+          const cb = this.yieldCb;
+          this.yieldCb = null;
+          this.release(c);
+          this.current = null;
+          if (this.timer) clearInterval(this.timer);
+          this.timer = null;
+          this.dropUpcoming();
+          cb();
+          return;
+        }
         const rem = Math.max(0, c.mix.cueOut - t);
         if (this.hooks.breakDue(rem) || this.hooks.isBusy()) {
           // …sauf si un écran de spots est dû : le titre finit seul, puis les spots, puis la musique.

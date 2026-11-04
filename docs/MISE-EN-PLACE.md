@@ -55,37 +55,19 @@ insert into public.organizations (name, slug) values ('Nom de l’enseigne', 'no
 
 ---
 
-## 3. Musique
+## 3. Musique et flux
 
-**Par défaut, rien à installer** : déposez les morceaux dans **Régie → Bibliothèque**. Onde les
-analyse (volume, début, fin, enchaînement), les range dans les listes, et chaque lecteur les joue
-lui-même. Le stockage gratuit de Supabase (1 Go) suffit pour environ 150 à 250 titres en MP3 ;
-au-delà, passer au forfait Pro (100 Go inclus).
+1. **Bibliothèque** : déposez les morceaux dans Régie → Bibliothèque. Onde les analyse (volume, début,
+   fin, enchaînement) et les range dans les listes. Le stockage gratuit de Supabase (1 Go) suffit pour
+   environ 150 à 250 titres en MP3 ; au-delà, forfait Pro (100 Go inclus).
+2. **Émetteur** (le flux de chaque enseigne) : Régie → Émetteur → Créer une clé, puis coller la commande
+   affichée dans le Terminal d’un Mac (test) ou d’un serveur (production). Docker requis.
+   Détails : [infra/emetteur](../infra/emetteur/README.md).
+3. **Lecteurs** : rien à faire. Ils écoutent le flux de leur enseigne dès que l’émetteur est en service,
+   et jouent la musique en cache sinon.
 
-### Option : un flux AzuraCast (Hetzner, 20 min)
-
-Utile seulement pour diffuser une ambiance en flux continu plutôt que depuis la bibliothèque.
-
-1. Compte sur [hetzner.com/cloud](https://www.hetzner.com/cloud) → **Add Server** :
-   - Image **Ubuntu 24.04** · type **CPX32** (4 vCPU, 8 Go) pour le pilote · localisation Allemagne.
-2. Ouvre la **console** du serveur (bouton `>_`), connecte-toi en `root`.
-3. Copie le contenu de [`infra/azuracast/install.sh`](../infra/azuracast/install.sh) dans un fichier sur le serveur et lance-le :
-   ```bash
-   nano install.sh   # colle le contenu, Ctrl+O, Entrée, Ctrl+X
-   bash install.sh
-   ```
-4. Ouvre `http://IP-DU-SERVEUR`, crée le compte administrateur AzuraCast.
-5. Crée une **station par ambiance** (ex. `aubert_signature`, `aubert_soft`, `aubert_energie`).
-   Dans chaque station : **Profil → AutoDJ** → active le **calage automatique (autocue)**.
-6. **Administration → Clés API** → crée une clé.
-7. Dans Vercel, ajoute :
-   | Nom | Valeur |
-   |---|---|
-   | `AZURACAST_URL` | `http://IP-DU-SERVEUR` (puis le nom de domaine) |
-   | `AZURACAST_API_KEY` | la clé créée |
-   puis **Redeploy**. La vue d’ensemble affiche alors les flux en direct.
-
----
+Pour la production : un petit serveur (Hetzner CX23, environ 6 € par mois, tient une dizaine de flux)
+et une adresse HTTPS pour les flux (`PUBLIC_URL`).
 
 ## 4. Avant de diffuser dans un vrai magasin (toi)
 

@@ -2,17 +2,18 @@
 
 /**
  * Lecteur boutique (version pilote, dans un navigateur).
- * Joue lui-même la musique de la bibliothèque (programmation, normalisation, points de mix),
- * ou à défaut le flux de l’ambiance ; insère les spots entre deux titres selon les règles,
- * envoie son signal de vie, ses preuves de diffusion et l’historique des titres.
- * Garde son programme et sa musique en mémoire pour continuer si la connexion tombe.
+ * Écoute le flux de son enseigne (émetteur Onde) et place les spots de la boutique entre deux titres.
+ * Si le flux coupe, joue la musique de la bibliothèque gardée en cache, avec les mêmes règles,
+ * puis rend l’antenne au flux dès qu’il revient. Envoie signal de vie, preuves et titres joués.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { buildRequests, decide, toRules, type Decision, type PlayedSpot, type ScheduleSpot, type ScheduledSpot } from '@onde/rules';
 import { MusicEngine, type MusicSchedule, type TrackStart } from './MusicEngine';
+import { StreamDirector, type OndePlay, type StreamTrack } from './StreamDirector';
+import { streamSupported } from './StreamPlayer';
 import './player.css';
 
-const VERSION = '0.3.0-web';
+const VERSION = '0.4.0-web';
 const keys = (p: string) => ({
   token: `${p}token`,
   schedule: `${p}schedule`,
@@ -30,7 +31,7 @@ interface Schedule {
   store: { name: string; max_volume?: number; timezone?: string | null } | null;
   rules: Parameters<typeof toRules>[0] & { duck_music?: boolean };
   org: { hq_spots_enabled: boolean; emergency: Emergency | null } | null;
-  stream: { name: string; url: string | null } | null;
+  stream: { name: string; url: string | null; kind?: 'onde' | 'external' } | null;
   spots: Spot[];
   music?: MusicSchedule | null;
 }
@@ -100,9 +101,12 @@ export function Player({ demo }: { demo: boolean }) {
   const [emergency, setEmergency] = useState<Emergency | null>(null);
   const [clock, setClock] = useState(Date.now());
   const [soundBlocked, setSoundBlocked] = useState(false);
+  const [source, setSource] = useState<'flux' | 'secours' | 'bibliotheque' | 'externe' | null>(null);
 
   const music = useRef<HTMLAudioElement | null>(null);
   const engine = useRef<MusicEngine | null>(null);
+  const director = useRef<StreamDirector | null>(null);
+  const handing = useRef(false);
   const outputLufs = useRef<number | null>(null);
   const busy = useRef(false);
   const startedAt = useRef(0);
@@ -189,10 +193,13 @@ export function Player({ demo }: { demo: boolean }) {
       return () => clearInterval(id);
     }
     const load = async () => {
-      if (engine.current) return; // musique jouée par le lecteur : il sait ce qu’il joue
+      // Bibliothèque seule : le lecteur sait déjà ce qu’il joue.
+      if (!director.current && (engine.current?.running || hasMusic(scheduleRef.current))) return;
       try {
-        const r = (await api('nowplaying')) as { now_playing: { title: string; artist: string; remaining: number } | null };
-        if (!engine.current) setNp(r.now_playing ? { ...r.now_playing, at: Date.now() } : null);
+        const r = (await api('nowplaying')) as { now_playing: { title: string; artist: string; remaining: number } | null; plays?: OndePlay[] };
+        // Flux Onde : les titres récents et à venir servent à repérer chaque titre entendu ici.
+        if (director.current) director.current.setPlays(r.plays ?? []);
+        else setNp(r.now_playing ? { ...r.now_playing, at: Date.now() } : null);
       } catch {
         /* inconnu : les spots passent dès qu’ils sont dus */
       }
@@ -214,7 +221,7 @@ export function Player({ demo }: { demo: boolean }) {
             app_version: VERSION,
             now_playing: cur ? { title: cur.title, artist: cur.artist, ambience: cur.ambience ?? null, ends_at: new Date(cur.at + cur.remaining * 1000).toISOString() } : null,
             cache_seconds: engine.current ? engine.current.cacheSeconds() : null,
-            output_lufs: engine.current ? outputLufs.current : null
+            output_lufs: engine.current?.running ? outputLufs.current : null
           })
         })) as { emergency: Emergency | null };
         setOnline(true);
@@ -240,17 +247,29 @@ export function Player({ demo }: { demo: boolean }) {
   const baseVolume = () => Math.min(1, (scheduleRef.current?.store?.max_volume ?? 80) / 100);
   /** Niveau de la musique, de 0 (coupée) à 1 (volume de la boutique). */
   const duckTo = async (level: number, ms = 800) => {
-    if (engine.current) return engine.current.duck(level, ms);
+    const jobs: Promise<unknown>[] = [];
+    if (director.current) jobs.push(director.current.duck(level, ms));
+    if (engine.current?.running) jobs.push(engine.current.duck(level, ms));
     const a = music.current;
-    if (!a) return;
-    const from = a.volume;
-    const to = level * baseVolume();
-    const steps = 16;
-    for (let i = 1; i <= steps; i++) {
-      a.volume = from + ((to - from) * i) / steps;
-      await sleep(ms / steps);
+    if (a && a.src && !a.paused) {
+      jobs.push(
+        (async () => {
+          const from = a.volume;
+          const to = level * baseVolume();
+          for (let i = 1; i <= 16; i++) {
+            a.volume = from + ((to - from) * i) / 16;
+            await sleep(ms / 16);
+          }
+        })()
+      );
     }
+    await Promise.all(jobs);
   };
+  /** De la musique s’entend-elle en ce moment (flux, bibliothèque ou flux externe) ? */
+  const musicPlaying = () =>
+    (director.current?.isActive && director.current.state === 'playing') ||
+    (engine.current?.running && engine.current.state === 'playing') ||
+    Boolean(music.current?.src && !music.current.paused);
 
   const say = (text: string) =>
     new Promise<void>((resolve) => {
@@ -277,14 +296,10 @@ export function Player({ demo }: { demo: boolean }) {
   const playBreak = useCallback(async (items: ScheduledSpot[]) => {
     busy.current = true;
     const s = scheduleRef.current;
-    // Entre deux titres joués par le lecteur, la musique est déjà arrêtée : rien à baisser.
-    const between = engine.current != null && engine.current.state !== 'playing';
+    // Entre deux titres (flux en pause ou bibliothèque arrêtée), la musique est déjà coupée : rien à baisser.
+    const between = !musicPlaying();
     const duck = s?.rules?.duck_music !== false;
-    if (!between) {
-      if (duck) await duckTo(0.15);
-      else if (engine.current) await duckTo(0, 300);
-      else music.current?.pause();
-    }
+    if (!between) await duckTo(duck ? 0.15 : 0, duck ? 800 : 300);
     for (const it of items) {
       const spot = s?.spots.find((x) => x.id === it.request.spotId);
       setOnAir({ title: it.request.title, origin: it.request.origin });
@@ -305,10 +320,7 @@ export function Player({ demo }: { demo: boolean }) {
       await sleep(400);
     }
     setOnAir(null);
-    if (!between) {
-      if (duck || engine.current) await duckTo(1);
-      else music.current?.play().catch(() => undefined);
-    }
+    if (!between) await duckTo(1);
     busy.current = false;
   }, []);
 
@@ -327,7 +339,7 @@ export function Player({ demo }: { demo: boolean }) {
       rules: toRules(s.rules),
       history: read<PlayedSpot[]>(K.history, []),
       handled,
-      avgTrackSec: engine.current && tracks.length ? tracks.reduce((a, t) => a + t.cue_out - t.cue_in, 0) / tracks.length : undefined
+      avgTrackSec: tracks.length ? tracks.reduce((a, t) => a + t.cue_out - t.cue_in, 0) / tracks.length : undefined
     });
     if (d.missed.length) {
       for (const m of d.missed) handled.add(m.request.id);
@@ -337,64 +349,125 @@ export function Player({ demo }: { demo: boolean }) {
     return d;
   }, []);
 
-  // ───── Musique jouée par le lecteur (bibliothèque Onde) ─────
+  // ───── Musique : flux de l’enseigne, bibliothèque en cache (secours), flux externe ─────
   const hasMusic = (s: Schedule | null) => Boolean(s?.music?.tracks.some((t) => t.url) && s.music.playlists.some((p) => p.trackIds.length));
+  const logPlay = (p: TrackPlay) => write(K.trackplays, [...read<TrackPlay[]>(K.trackplays, []), p].slice(-2000));
+  const breakDue = useCallback(
+    (rem: number) => {
+      const d = decideNow(rem);
+      return Boolean(d?.next && d.next.kind === 'between_tracks' && d.next.at <= Date.now() + rem * 1000 + 1500);
+    },
+    [decideNow]
+  );
+  const runBreak = useCallback(async () => {
+    while (busy.current) await sleep(200);
+    const d = decideNow(0);
+    if (d?.play.length) await playBreak(d.play);
+  }, [decideNow, playBreak]);
 
-  const startEngine = useCallback(
-    (s: Schedule) => {
-      const e = new MusicEngine({
-        onTrackStart: (t: TrackStart) => {
-          outputLufs.current = t.outputLufs;
-          if (t.isJingle) return; // les jingles ne figurent pas dans l’historique des titres
-          const play: TrackPlay = {
-            track_id: t.track.id,
-            playlist_id: t.playlistId,
-            title: t.track.title,
-            artist: t.track.artist,
-            isrc: t.track.isrc,
-            played_at: new Date().toISOString(),
-            duration_sec: Math.round((t.track.cue_out - t.track.cue_in) * 10) / 10
-          };
-          write(K.trackplays, [...read<TrackPlay[]>(K.trackplays, []), play].slice(-2000));
-        },
-        breakDue: (rem) => {
-          const d = decideNow(rem);
-          return Boolean(d?.next && d.next.kind === 'between_tracks' && d.next.at <= Date.now() + rem * 1000 + 1500);
-        },
-        runBreak: async () => {
-          while (busy.current) await sleep(200);
-          const d = decideNow(0);
-          if (d?.play.length) await playBreak(d.play);
-        },
-        isBusy: () => busy.current,
-        onBlocked: setSoundBlocked
-      });
+  /** Bibliothèque en cache : télécharge la musique d’avance ; ne joue que si `run`. */
+  const ensureEngine = useCallback(
+    (s: Schedule, run: boolean) => {
+      let e = engine.current;
+      if (!e) {
+        e = new MusicEngine({
+          onTrackStart: (t: TrackStart) => {
+            outputLufs.current = t.outputLufs;
+            if (t.isJingle) return; // les jingles ne figurent pas dans l’historique des titres
+            logPlay({
+              track_id: t.track.id,
+              playlist_id: t.playlistId,
+              title: t.track.title,
+              artist: t.track.artist,
+              isrc: t.track.isrc,
+              played_at: new Date().toISOString(),
+              duration_sec: Math.round((t.track.cue_out - t.track.cue_in) * 10) / 10
+            });
+          },
+          breakDue,
+          runBreak,
+          isBusy: () => busy.current,
+          onBlocked: setSoundBlocked
+        });
+        engine.current = e;
+      }
       e.setSchedule(s.music!, s.store?.timezone ?? null);
       e.setBaseVolume(baseVolume());
-      engine.current = e;
-      music.current?.pause();
-      void e.start();
+      if (run && !e.running) {
+        music.current?.pause();
+        void e.start();
+      }
+      return e;
     },
-    [decideNow, playBreak]
+    [breakDue, runBreak]
   );
 
-  // Programme mis à jour : nouveaux titres, volume ; bascule sur la bibliothèque dès qu’elle a de quoi jouer.
+  /** Flux de l’enseigne : antenne principale. S’il coupe, la bibliothèque en cache prend le relais. */
+  const startDirector = useCallback(
+    (url: string) => {
+      const d = new StreamDirector(url, {
+        breakDue,
+        runBreak,
+        isBusy: () => busy.current,
+        onBlocked: setSoundBlocked,
+        onTrackStart: (t: StreamTrack) => {
+          if (!t.play || t.play.is_jingle || !t.play.track_id) return;
+          logPlay({
+            track_id: t.play.track_id,
+            playlist_id: t.play.playlist_id ?? '',
+            title: t.title,
+            artist: t.artist,
+            isrc: t.play.isrc,
+            played_at: new Date().toISOString(),
+            duration_sec: Math.round(t.play.duration_sec * 10) / 10
+          });
+        },
+        onDown: (down) => {
+          const s = scheduleRef.current;
+          if (!down || !s || !hasMusic(s)) return;
+          // Flux coupé : la musique en cache prend l’antenne, le flux continue d’essayer en coulisse.
+          d.standby();
+          handing.current = false;
+          ensureEngine(s, true);
+        }
+      });
+      d.setBaseVolume(baseVolume());
+      director.current = d;
+      music.current?.pause();
+      void d.start();
+    },
+    [breakDue, runBreak, ensureEngine]
+  );
+
+  // Programme mis à jour : titres, volume, adresse du flux ; bascule sur le flux dès qu’il existe.
   useEffect(() => {
     if (!started || !schedule || demo) return;
-    const e = engine.current;
-    if (e) {
-      if (schedule.music) e.setSchedule(schedule.music, schedule.store?.timezone ?? null);
-      e.setBaseVolume(baseVolume());
-    } else if (hasMusic(schedule)) startEngine(schedule);
-  }, [schedule, started, demo, startEngine]);
+    if (hasMusic(schedule)) ensureEngine(schedule, !director.current && schedule.stream?.kind !== 'onde');
+    const url = schedule.stream?.kind === 'onde' ? schedule.stream.url : null;
+    if (url && streamSupported()) {
+      if (director.current) director.current.setUrl(url);
+      else {
+        startDirector(url);
+        // La bibliothèque jouait : le flux se met en mémoire et prendra l’antenne au prochain titre.
+        if (engine.current?.running) director.current!.standby();
+      }
+    }
+    director.current?.setBaseVolume(baseVolume());
+  }, [schedule, started, demo, ensureEngine, startDirector]);
 
-  useEffect(() => () => engine.current?.stop(), []);
+  useEffect(
+    () => () => {
+      engine.current?.stop();
+      director.current?.stop();
+    },
+    []
+  );
 
-  // Flux externe (sans bibliothèque) : le lancer s’il arrive après le démarrage, ou s’il change.
+  // Flux externe (ni flux Onde ni bibliothèque) : le lancer s’il arrive après le démarrage, ou s’il change.
   useEffect(() => {
     const a = music.current;
     const url = schedule?.stream?.url;
-    if (!started || demo || engine.current || hasMusic(schedule) || !a || !url) return;
+    if (!started || demo || director.current || engine.current?.running || hasMusic(schedule) || schedule?.stream?.kind === 'onde' || !a || !url) return;
     if (a.src.split('?')[0] === url.split('?')[0] && !a.paused) return;
     a.src = url;
     a.volume = baseVolume();
@@ -403,8 +476,9 @@ export function Player({ demo }: { demo: boolean }) {
 
   const unblock = async () => {
     setSoundBlocked(false);
-    if (engine.current) await engine.current.resume();
-    else await music.current?.play().catch(() => setSoundBlocked(true));
+    if (director.current) await director.current.resume();
+    if (engine.current?.running) await engine.current.resume();
+    if (!director.current && !engine.current?.running) await music.current?.play().catch(() => setSoundBlocked(true));
   };
 
   // ───── Urgence : passe tout de suite, une fois ─────
@@ -429,21 +503,33 @@ export function Player({ demo }: { demo: boolean }) {
     if (!started) return;
     const id = setInterval(() => {
       setClock(Date.now());
-      const e = engine.current;
-      if (e) {
-        const n = e.nowPlaying();
-        setNp(n ? { title: n.title, artist: n.artist, ambience: n.ambience, daypart: n.daypart, position: n.position, length: n.length, remaining: e.remaining() ?? 0, at: Date.now() } : null);
+      const dir = director.current;
+      const e = engine.current?.running ? engine.current : null;
+      // Le flux revient pendant que la bibliothèque joue : il reprend l’antenne au prochain enchaînement.
+      if (dir && !dir.isActive && dir.healthy && e && !handing.current) {
+        handing.current = true;
+        e.yieldAtNextBoundary(() => {
+          handing.current = false;
+          void dir.activate();
+        });
+      }
+      const src = dir?.isActive ? dir : e;
+      setSource(dir?.isActive ? 'flux' : e ? (dir ? 'secours' : 'bibliotheque') : music.current?.src ? 'externe' : null);
+      if (src) {
+        const n = src.nowPlaying();
+        const amb = src === e ? e.nowPlaying() : null;
+        setNp(n ? { title: n.title, artist: n.artist, ambience: amb?.ambience, daypart: amb?.daypart, position: n.position, length: n.length, remaining: src.remaining() ?? 0, at: Date.now() } : null);
       }
       if (!scheduleRef.current || busy.current) return;
       const cur = npRef.current;
-      const remaining = e ? e.remaining() : cur ? cur.remaining - (Date.now() - cur.at) / 1000 : null;
+      const remaining = src ? src.remaining() : cur ? cur.remaining - (Date.now() - cur.at) / 1000 : null;
       const d = decideNow(remaining);
       if (!d) return;
       setNext(d.next ? { at: d.next.at, titles: d.next.items.map((i) => i.request.title) } : null);
       if (!d.play.length) return;
-      // Musique jouée par le lecteur : l’écran entre deux titres est lancé par le moteur, au point de sortie,
+      // Flux ou bibliothèque : l’écran entre deux titres part au changement de titre exact,
       // sauf si la régie autorise à couper un titre.
-      if (e && d.kind === 'between_tracks' && e.state !== 'idle' && toRules(scheduleRef.current.rules).neverCutTrack) return;
+      if (src && d.kind === 'between_tracks' && src.state !== 'idle' && toRules(scheduleRef.current.rules).neverCutTrack) return;
       playBreak(d.play);
     }, 1000);
     return () => clearInterval(id);
@@ -471,7 +557,11 @@ export function Player({ demo }: { demo: boolean }) {
 
   const start = async () => {
     startedAt.current = Date.now();
-    if (!demo && schedule && hasMusic(schedule)) startEngine(schedule);
+    const onde = schedule?.stream?.kind === 'onde' && schedule.stream.url && streamSupported() ? schedule.stream.url : null;
+    if (!demo && schedule && onde) {
+      if (hasMusic(schedule)) ensureEngine(schedule, false); // musique de secours téléchargée d’avance
+      startDirector(onde);
+    } else if (!demo && schedule && hasMusic(schedule)) ensureEngine(schedule, true);
     else {
       const a = music.current;
       if (a && schedule?.stream?.url) {
@@ -486,9 +576,9 @@ export function Player({ demo }: { demo: boolean }) {
 
   const onMusicError = () => {
     const url = scheduleRef.current?.stream?.url;
-    if (!url || !music.current || engine.current) return;
+    if (!url || !music.current || director.current || engine.current?.running) return;
     setTimeout(() => {
-      if (!music.current || engine.current) return;
+      if (!music.current || director.current || engine.current?.running) return;
       music.current.src = `${url}${url.includes('?') ? '&' : '?'}r=${Date.now()}`;
       music.current.play().catch(() => undefined);
     }, 5000);
@@ -550,7 +640,13 @@ export function Player({ demo }: { demo: boolean }) {
           ) : (
             <section aria-live="polite">
               <div className="lp-label">
-                {np?.ambience ? `Ambiance ${np.ambience}${np.daypart ? ` · ${np.daypart}` : ''}` : !engine.current && schedule?.stream?.name ? `Ambiance ${schedule.stream.name}` : 'En cours'}
+                {source === 'secours'
+                  ? 'Flux coupé · musique en mémoire'
+                  : np?.ambience
+                    ? `Ambiance ${np.ambience}${np.daypart ? ` · ${np.daypart}` : ''}`
+                    : schedule?.stream?.name
+                      ? `${source === 'flux' ? 'Flux' : 'Ambiance'} ${schedule.stream.name}`
+                      : 'En cours'}
               </div>
               <div className="lp-title">{np?.title ?? (hasMusic(schedule) || schedule?.stream?.url ? 'Lecture en cours' : 'Aucune musique programmée')}</div>
               <div className="lp-artist">{np?.artist ?? ''}</div>

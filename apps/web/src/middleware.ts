@@ -6,6 +6,8 @@ const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? '';
 
 export async function middleware(request: NextRequest) {
   if (!url || !key) return NextResponse.next();
+  const p = request.nextUrl.pathname;
+  if (p.startsWith('/api/emitter') || p.startsWith('/emetteur/')) return NextResponse.next();
 
   let response = NextResponse.next({ request });
   const supabase = createServerClient(url, key, {
@@ -24,7 +26,9 @@ export async function middleware(request: NextRequest) {
   } = await supabase.auth.getUser();
 
   const path = request.nextUrl.pathname;
-  const isPublic = path.startsWith('/login') || path.startsWith('/auth') || path.startsWith('/api/device') || path.startsWith('/lecteur');
+  // Lecteurs et émetteur s’authentifient par leur propre jeton ; /emetteur/ sert les fichiers d’installation (sans secret).
+  const isPublic =
+    path.startsWith('/login') || path.startsWith('/auth') || path.startsWith('/api/device') || path.startsWith('/api/emitter') || path.startsWith('/lecteur') || path.startsWith('/emetteur/');
   if (!user && !isPublic) {
     const to = request.nextUrl.clone();
     to.pathname = '/login';

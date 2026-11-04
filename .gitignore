@@ -8,3 +8,4 @@ dist
 supabase/.temp
 supabase/tests/.pgdata
 *.tsbuildinfo
+apps/web/public/emetteur/

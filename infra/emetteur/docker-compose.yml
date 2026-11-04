@@ -1,0 +1,13 @@
+# Lancement : ONDE_CLE=… docker compose up -d --build   (ou le script install.sh)
+services:
+  emetteur:
+    build: .
+    image: onde-emetteur
+    container_name: onde-emetteur
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      ONDE_URL: ${ONDE_URL:-https://onde-rust.vercel.app}
+      ONDE_CLE: ${ONDE_CLE:?Clé manquante (Régie → Émetteur → Créer une clé)}
+      PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8000}
