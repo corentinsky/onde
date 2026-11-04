@@ -8,9 +8,10 @@ un **siège** qui pilote ses campagnes, des **magasins** qui diffusent et propos
 | Dossier | Contenu |
 |---|---|
 | `apps/web` | Application web (Next.js) : régie, API des lecteurs |
-| `packages/rules` | Moteur de règles de diffusion, partagé par la régie et les lecteurs |
+| `packages/rules` | Règles de diffusion et programmation musicale, partagées par la régie et les lecteurs |
+| `packages/audio` | Analyse audio : volume EBU R128, crête, points de mix |
 | `supabase` | Schéma de la base, sécurité par ligne, données de démo, tests |
-| `infra/azuracast` | Installation du moteur musical sur un serveur |
+| `infra/azuracast` | Option : flux AzuraCast pour une ambiance |
 | `docs` | [Mise en place](docs/MISE-EN-PLACE.md) · [Architecture](docs/ARCHITECTURE.md) |
 
 ## Lancer en local
@@ -18,7 +19,7 @@ un **siège** qui pilote ses campagnes, des **magasins** qui diffusent et propos
 ```bash
 npm install
 npm run dev        # http://localhost:3000 — mode démo tant que Supabase n’est pas configuré
-npm test           # moteur de règles
+npm test           # règles, programmation musicale, analyse audio
 npm run build
 ```
 
@@ -44,5 +45,6 @@ Configuration : copier `apps/web/.env.example` en `apps/web/.env.local`.
 - [x] API des lecteurs (appairage, signal de vie, programme, preuves)
 - [ ] Espaces siège et magasin
 - [x] Lecteur boutique, version navigateur (pilote)
-- [ ] Lecteur boîtier avec musique en avance
+- [x] Musique : bibliothèque, analyse EBU R128 et points de mix, listes et journée type, lecture avec enchaînements, cache hors ligne, titres joués
+- [ ] Lecteur boîtier
 - [ ] Invitations, calendrier, rapport de campagne

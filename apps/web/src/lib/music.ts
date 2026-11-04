@@ -131,6 +131,38 @@ export async function listDayparts(orgId: string): Promise<DaypartRow[]> {
   return (data ?? []) as DaypartRow[];
 }
 
+export interface TrackPlayRow {
+  id: number;
+  title: string;
+  artist: string;
+  isrc: string | null;
+  played_at: string;
+  duration_sec: number | null;
+  playlist: string | null;
+}
+
+/** Historique des titres joués dans une boutique (relevés de diffusion). */
+export async function listTrackPlays(storeId: string, limit = 50): Promise<TrackPlayRow[]> {
+  if (!isConfigured) return [];
+  const sb = await supabaseServer();
+  const { data, error } = await sb
+    .from('track_plays')
+    .select('id,title,artist,isrc,played_at,duration_sec,playlists(name)')
+    .eq('store_id', storeId)
+    .order('played_at', { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return (data ?? []).map((r) => ({
+    id: r.id as number,
+    title: r.title as string,
+    artist: r.artist as string,
+    isrc: r.isrc as string | null,
+    played_at: r.played_at as string,
+    duration_sec: r.duration_sec == null ? null : Number(r.duration_sec),
+    playlist: (r.playlists as unknown as { name: string } | null)?.name ?? null
+  }));
+}
+
 export const toMin = (t: string | null) => {
   if (!t) return null;
   const [h, m] = t.split(':').map(Number);

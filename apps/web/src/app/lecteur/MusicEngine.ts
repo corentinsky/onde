@@ -108,6 +108,8 @@ export class MusicEngine {
   private waitUntil = 0;
   private holding = false;
   private heldEndsAt = 0;
+  /** Titre qui finit pendant qu’un écran de spots attend : reste affiché jusqu’au point de sortie. */
+  private ending: Deck | null = null;
   private ticking = false;
 
   constructor(
@@ -179,7 +181,7 @@ export class MusicEngine {
   }
 
   nowPlaying() {
-    const c = this.current;
+    const c = this.current ?? (this.holding && Date.now() < this.heldEndsAt ? this.ending : null);
     if (!c?.started) return null;
     return {
       title: c.track.title,
@@ -399,11 +401,13 @@ export class MusicEngine {
           // …sauf si un écran de spots est dû : le titre finit seul, puis les spots, puis la musique.
           this.holding = true;
           this.heldEndsAt = Date.now() + rem * 1000;
+          this.ending = c;
           this.release(c);
           this.current = null;
           await new Promise((r) => setTimeout(r, rem * 1000));
           await this.hooks.runBreak();
           this.holding = false;
+          this.ending = null;
           if (!this.hooks.isBusy()) await this.startNext();
           return;
         }
@@ -423,6 +427,7 @@ export class MusicEngine {
       this.current = null;
       this.upcoming = null;
       this.holding = false;
+      this.ending = null;
       this.waitUntil = Date.now() + 1000;
     } finally {
       this.ticking = false;

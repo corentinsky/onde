@@ -55,7 +55,16 @@ insert into public.organizations (name, slug) values ('Nom de l’enseigne', 'no
 
 ---
 
-## 3. Hetzner + AzuraCast — le moteur musical (toi, 20 min)
+## 3. Musique
+
+**Par défaut, rien à installer** : déposez les morceaux dans **Régie → Bibliothèque**. Onde les
+analyse (volume, début, fin, enchaînement), les range dans les listes, et chaque lecteur les joue
+lui-même. Le stockage gratuit de Supabase (1 Go) suffit pour environ 150 à 250 titres en MP3 ;
+au-delà, passer au forfait Pro (100 Go inclus).
+
+### Option : un flux AzuraCast (Hetzner, 20 min)
+
+Utile seulement pour diffuser une ambiance en flux continu plutôt que depuis la bibliothèque.
 
 1. Compte sur [hetzner.com/cloud](https://www.hetzner.com/cloud) → **Add Server** :
    - Image **Ubuntu 24.04** · type **CPX32** (4 vCPU, 8 Go) pour le pilote · localisation Allemagne.

@@ -527,7 +527,7 @@ export function Player({ demo }: { demo: boolean }) {
           ) : (
             <section aria-live="polite">
               <div className="lp-label">
-                {np?.ambience ? `Ambiance ${np.ambience}${np.daypart ? ` · ${np.daypart}` : ''}` : schedule?.stream?.name ? `Ambiance ${schedule.stream.name}` : 'En cours'}
+                {np?.ambience ? `Ambiance ${np.ambience}${np.daypart ? ` · ${np.daypart}` : ''}` : !engine.current && schedule?.stream?.name ? `Ambiance ${schedule.stream.name}` : 'En cours'}
               </div>
               <div className="lp-title">{np?.title ?? (hasMusic(schedule) || schedule?.stream?.url ? 'Lecture en cours' : 'Aucune musique programmée')}</div>
               <div className="lp-artist">{np?.artist ?? ''}</div>

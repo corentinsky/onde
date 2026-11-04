@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { getSession, getStore, listDevices, listIncidents, listPlayLogs } from '@/lib/data';
+import { listTrackPlays, mmss } from '@/lib/music';
 import { ago, clock, hours, incidentLabel, originLabel, stateLabel } from '@/lib/format';
 import { addDevice, resolveIncident } from '../../actions';
 
@@ -11,7 +12,7 @@ export default async function StorePage({ params, searchParams }: { params: Prom
   if (!org) return null;
   const store = await getStore(id);
   if (!store) notFound();
-  const [logs, incidents, devices] = await Promise.all([listPlayLogs(id), listIncidents(org.id, id), listDevices(id)]);
+  const [logs, incidents, devices, plays] = await Promise.all([listPlayLogs(id), listIncidents(org.id, id), listDevices(id), listTrackPlays(id)]);
   const pendingCodes = [...devices.filter((d) => d.pairing_code).map((d) => d.pairing_code as string), ...(demoCode ? [demoCode] : [])];
   const played = logs.filter((l) => l.status === 'played').length;
   const missed = logs.length - played;
@@ -116,6 +117,29 @@ export default async function StorePage({ params, searchParams }: { params: Prom
                       {l.status === 'played' ? 'Joué en entier' : l.reason === 'window' ? 'Hors fenêtre' : 'Non diffusé'}
                     </span>
                   </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="card">
+        <h2>Titres joués</h2>
+        <p className="sub">Historique envoyé par le lecteur, titre par titre : la base des relevés de diffusion.</p>
+        <div className="table-wrap">
+          <table className="table">
+            <thead><tr><th>Heure</th><th>Titre</th><th>Artiste</th><th>Liste</th><th>Durée</th><th>ISRC</th></tr></thead>
+            <tbody>
+              {plays.length === 0 && <tr><td colSpan={6} className="empty">Aucun titre enregistré : le lecteur joue un flux externe ou n’a pas encore envoyé son historique.</td></tr>}
+              {plays.map((t) => (
+                <tr key={t.id}>
+                  <td style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>{clock(t.played_at)}</td>
+                  <td>{t.title}</td>
+                  <td className="muted">{t.artist}</td>
+                  <td className="muted">{t.playlist ?? '—'}</td>
+                  <td style={{ fontVariantNumeric: 'tabular-nums' }}>{mmss(t.duration_sec, 0)}</td>
+                  <td className="muted small">{t.isrc ?? '—'}</td>
                 </tr>
               ))}
             </tbody>
