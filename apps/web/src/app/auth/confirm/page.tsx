@@ -25,9 +25,11 @@ export default function Confirm() {
     const access_token = hash.get('access_token');
     const refresh_token = hash.get('refresh_token');
     if (!access_token || !refresh_token) {
-      setError('Lien incomplet. Demandez-en un nouveau.');
+      setError(query.get('code') ? 'Ce lien a été émis par une ancienne version. Demandez-en un nouveau.' : 'Lien incomplet. Demandez-en un nouveau.');
       return;
     }
+    // On retire les jetons de l’adresse avant tout (historique, et pour que le client ne tente pas de les relire).
+    window.history.replaceState(null, '', window.location.pathname + window.location.search);
     const sb = createBrowserClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!);
     sb.auth.setSession({ access_token, refresh_token }).then(({ error: e }) => {
       if (e) setError('Connexion impossible. Demandez un nouveau lien.');
