@@ -25,7 +25,8 @@ const fr: Record<string, string> = {
   american: 'accent américain',
   british: 'accent britannique'
 };
-const t = (s?: string) => (s ? (fr[s.toLowerCase()] ?? s) : '');
+const t = (s?: string) => (s ? (/^fr([-_]|$)|french|parisian/i.test(s) ? 'accent français' : (fr[s.toLowerCase()] ?? s)) : '');
+const isFrench = (v: Voice) => v.description.includes('accent français');
 
 /** Voix disponibles sur le compte, ou la raison pour laquelle on ne peut pas les lire. */
 export async function listVoices(): Promise<{ voices: Voice[]; error: string | null }> {
@@ -47,7 +48,8 @@ export async function listVoices(): Promise<{ voices: Voice[]; error: string | n
         description: [t(v.labels?.gender), t(v.labels?.age), t(v.labels?.accent)].filter(Boolean).join(', '),
         preview: v.preview_url ?? null
       }))
-      .sort((a, b) => a.name.localeCompare(b.name, 'fr'));
+      // Voix françaises d’abord : ce sont elles qu’on choisit pour des spots en France.
+      .sort((a, b) => Number(isFrench(b)) - Number(isFrench(a)) || a.name.localeCompare(b.name, 'fr'));
     return { voices, error: voices.length ? null : 'Aucune voix sur ce compte ElevenLabs.' };
   } catch {
     return { voices: [], error: 'ElevenLabs injoignable pour l’instant.' };
