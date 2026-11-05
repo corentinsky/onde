@@ -1,0 +1,22 @@
+# Sur un serveur : HTTPS automatique devant l’émetteur (les lecteurs des boutiques sont en HTTPS).
+# Caddy obtient et renouvelle seul les certificats (Let’s Encrypt) pour les adresses du Caddyfile.
+services:
+  emetteur:
+    environment:
+      PUBLIC_CANDIDATES: ${PUBLIC_CANDIDATES:-}
+      HTTPS_VIA: https:443
+  https:
+    image: caddy:2
+    container_name: onde-https
+    restart: unless-stopped
+    depends_on:
+      - emetteur
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - certificats:/data
+
+volumes:
+  certificats:

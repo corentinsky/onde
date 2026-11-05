@@ -8,10 +8,11 @@ import { useRouter } from 'next/navigation';
 import { useRef, useState } from 'react';
 import { analyze, gainFor, type Analysis } from '@onde/audio';
 import { browserClient, browserConfigured } from '@/lib/supabase/browser';
+import { keepAsIs, toMp3 } from './toMp3';
 
 interface Item {
   name: string;
-  status: 'waiting' | 'reading' | 'analysing' | 'uploading' | 'done' | 'error';
+  status: 'waiting' | 'reading' | 'analysing' | 'compressing' | 'uploading' | 'done' | 'error';
   message?: string;
   result?: { title: string; artist: string; a: Analysis };
 }
@@ -20,6 +21,7 @@ const label: Record<Item['status'], string> = {
   waiting: 'En attente',
   reading: 'Lecture des étiquettes…',
   analysing: 'Analyse du son…',
+  compressing: 'Compression en MP3…',
   uploading: 'Envoi…',
   done: 'Prêt',
   error: 'Erreur'
@@ -86,11 +88,18 @@ export function Uploader({ playlists }: { playlists: { id: string; label: string
           update(i, { status: 'done', message: 'Analyse seulement (mode démo)', result: { title: meta.title, artist: meta.artist, a } });
           continue;
         }
-        update(i, { status: 'uploading', result: { title: meta.title, artist: meta.artist, a } });
+        // Fichier lourd (WAV, FLAC, MP3 à fort débit) : MP3 192 kb/s, quatre à huit fois plus léger.
+        let body: Blob = file;
+        let ext = (file.name.split('.').pop() || 'mp3').toLowerCase();
+        if (!keepAsIs(file, a.durationSec)) {
+          update(i, { status: 'compressing', result: { title: meta.title, artist: meta.artist, a } });
+          body = await toMp3(buf, (p) => update(i, { message: `Compression en MP3… ${p} %` }));
+          ext = 'mp3';
+        }
+        update(i, { status: 'uploading', message: undefined, result: { title: meta.title, artist: meta.artist, a } });
         const sb = browserClient();
-        const ext = (file.name.split('.').pop() || 'mp3').toLowerCase();
         const path = `${crypto.randomUUID()}.${ext}`;
-        const up = await sb.storage.from('music').upload(path, file, { contentType: file.type || 'audio/mpeg', upsert: false });
+        const up = await sb.storage.from('music').upload(path, body, { contentType: body === file ? file.type || 'audio/mpeg' : 'audio/mpeg', upsert: false });
         if (up.error) throw new Error(up.error.message);
         const { data: row, error } = await sb
           .from('tracks')
@@ -152,6 +161,7 @@ export function Uploader({ playlists }: { playlists: { id: string; label: string
         <div style={{ fontSize: 18, fontWeight: 600 }}>Déposez vos morceaux</div>
         <p className="sub" style={{ margin: '6px auto 16px', maxWidth: 560 }}>
           MP3, WAV, FLAC, M4A. Chaque titre est analysé dans votre navigateur : volume (EBU R128), crête, début et fin audibles, point de chevauchement.
+          Les fichiers lourds sont compressés en MP3 192 kb/s avant l’envoi.
         </p>
         <div className="actions" style={{ justifyContent: 'center', alignItems: 'center' }}>
           <button className="btn btn-primary" type="button" disabled={busy} onClick={() => input.current?.click()}>Choisir des fichiers</button>

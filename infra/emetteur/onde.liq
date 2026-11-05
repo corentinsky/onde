@@ -5,6 +5,7 @@
 #   ONDE_URL     adresse de la régie, ex. https://onde-rust.vercel.app
 #   ONDE_CLE     clé de l’émetteur, créée dans Régie → Émetteur
 #   PUBLIC_URL   adresse publique des flux, ex. http://localhost:8000
+#   ONDE_CACHE   dossier des titres gardés sur le disque (défaut /var/cache/onde)
 #   ICECAST_PASSWORD  mot de passe interne Icecast (généré au démarrage)
 
 settings.init.allow_root.set(true)
@@ -18,37 +19,64 @@ public_url = environment.get(default="http://localhost:8000", "PUBLIC_URL")
 icecast_password = environment.get("ICECAST_PASSWORD")
 auth = [("Authorization", "Bearer #{cle}"), ("User-Agent", "Onde-Emetteur/1.0")]
 
-# Téléchargement d’un titre : « onde:<extension>|<lien signé> ». L’extension est donnée par Onde,
-# car le lien signé (jeton dans l’adresse) ne permet pas de la deviner.
+# Titres gardés sur le disque de l’émetteur : chaque fichier n’est téléchargé qu’une fois
+# (au lieu d’une fois par passage), ce qui garde la bande passante du stockage au minimum.
+# « onde:<fichier>|<lien signé> » : <fichier> est le nom du titre dans la bibliothèque (identifiant + extension).
+# Les titres qui ne passent plus depuis 30 jours sont effacés par le démarrage (entrypoint.sh).
+cache_dir = environment.get(default="/var/cache/onde", "ONDE_CACHE")
+
 def onde_protocol(~rlog, ~maxtime, arg) =
   parts = string.split(separator="\\|", arg)
-  ext = list.hd(default="mp3", parts)
+  key = list.hd(default="", parts)
   uri = string.concat(separator="|", list.tl(parts))
-  output = file.temp("onde-titre", ".#{ext}")
-  writer = file.write.stream(output)
-  try
-    r = http.get.stream(on_body_data=writer, timeout=maxtime - time(), uri)
-    if r.status_code < 400 then
-      [output]
-    else
-      rlog("Téléchargement refusé : #{r.status_code}")
-      []
-    end
-  catch err do
-    rlog("Téléchargement impossible : #{err}")
+  if not r/^[A-Za-z0-9][A-Za-z0-9_-]{7,100}\.[a-z0-9]{2,5}$/.test(key) or uri == "" then
+    rlog("Adresse de titre invalide.")
     []
+  else
+    path = "#{cache_dir}/#{key}"
+    if file.exists(path) and file.size(path) > 0 then
+      # Date d’utilisation : le ménage ne retire que les titres qui ne passent plus.
+      ignore(process.run("touch -c #{process.quote(path)}"))
+      [path]
+    else
+      part = "#{path}.#{random.int(min=0, max=999999999)}.part"
+      writer = file.write.stream(part)
+      try
+        r = http.get.stream(on_body_data=writer, timeout=maxtime - time(), uri)
+        if r.status_code < 400 and file.exists(part) and file.size(part) > 0 then
+          file.move(part, path)
+          [path]
+        else
+          rlog("Téléchargement refusé : #{r.status_code}")
+          if file.exists(part) then file.remove(part) end
+          []
+        end
+      catch err do
+        rlog("Téléchargement impossible : #{err}")
+        if file.exists(part) then file.remove(part) end
+        []
+      end
+    end
   end
 end
-protocol.add(temporary=true, syntax="onde:<ext>|<url>", doc="Titre de la bibliothèque Onde", "onde", onde_protocol)
+protocol.add(temporary=false, syntax="onde:<fichier>|<url>", doc="Titre de la bibliothèque Onde (gardé en cache)", "onde", onde_protocol)
 
 if onde == "" or cle == "" then
   log.critical("ONDE_URL et ONDE_CLE sont obligatoires.")
   shutdown(code=1)
 end
 
+# Adresse publique des flux : sur un serveur, entrypoint.sh écrit la première adresse HTTPS
+# qui répond avec un certificat valide ; sinon PUBLIC_URL.
+def public_address() =
+  f = "/tmp/onde-public-url"
+  u = if file.exists(f) then string.trim(file.contents(f)) else "" end
+  if u != "" then u else public_url end
+end
+
 # Liste des flux à diffuser : « version <empreinte> » puis « <enseigne> <point de montage> <nom> ».
 def read_config() =
-  r = http.get(headers=auth, timeout=20., "#{onde}/api/emitter/config?public_url=#{url.encode(public_url)}")
+  r = http.get(headers=auth, timeout=20., "#{onde}/api/emitter/config?public_url=#{url.encode(public_address())}")
   if r.status_code == 200 then
     r
   else

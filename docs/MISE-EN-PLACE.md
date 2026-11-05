@@ -58,21 +58,29 @@ insert into public.organizations (name, slug) values ('Nom de l’enseigne', 'no
 ## 3. Musique et flux
 
 1. **Bibliothèque** : déposez les morceaux dans Régie → Bibliothèque. Onde les analyse (volume, début,
-   fin, enchaînement) et les range dans les listes. Le stockage gratuit de Supabase (1 Go) suffit pour
-   environ 150 à 250 titres en MP3 ; au-delà, forfait Pro (100 Go inclus).
+   fin, enchaînement) et les range dans les listes. Les fichiers lourds (WAV, FLAC, MP3 à plus de 200 kb/s)
+   sont compressés en MP3 192 kb/s dans le navigateur avant l’envoi : environ 5,5 Mo par titre de 4 min,
+   donc 100 titres tiennent dans le stockage gratuit de Supabase (1 Go), avec de la marge.
 2. **Émetteur** (le flux de chaque enseigne) : Régie → Émetteur → Créer une clé, puis coller la commande
-   affichée dans le Terminal d’un Mac (test) ou d’un serveur (production). Docker requis.
-   Détails : [infra/emetteur](../infra/emetteur/README.md).
-3. **Lecteurs** : rien à faire. Ils écoutent le flux de leur enseigne dès que l’émetteur est en service,
-   et jouent la musique en cache sinon.
+   affichée. Détails : [infra/emetteur](../infra/emetteur/README.md).
+   - **Serveur** (production) : un VPS Linux sous Ubuntu 24.04, 1 cœur et 2 Go suffisent. Se connecter avec
+     `ssh root@<adresse IP>` depuis le Terminal du Mac et coller la commande : Docker s’installe, le certificat
+     HTTPS s’obtient tout seul (adresse IP du serveur, ou `ONDE_DOMAINE=flux.mondomaine.fr`). Ports 80 et 443
+     ouverts.
+   - **Mac** (essai) : Docker Desktop, puis la même commande. Les flux ne s’écoutent que sur ce Mac.
+3. **Lecteurs** : rien à faire. Ils écoutent le flux de leur enseigne dès que l’émetteur est en service
+   (adresse HTTPS), et jouent la musique en cache sinon.
 
-Pour la production : un petit serveur (Hetzner CX23, environ 6 € par mois, tient une dizaine de flux)
-et une adresse HTTPS pour les flux (`PUBLIC_URL`).
+**Coûts** (novembre 2026, TTC) : le serveur le moins cher qui convient est l’IONOS VPS S+ (1 cœur, 2 Go,
+60 Go, trafic illimité) : 2,40 € par mois les trois premiers mois puis 6 €, plus 12 € de mise en service.
+Alternative sans frais de mise en service, facturée à l’heure : Hetzner CX23 (environ 7,20 €). Supabase et
+Vercel restent dans leurs offres gratuites pour un essai : l’émetteur garde les titres sur son disque
+(un seul téléchargement par titre) et chaque lecteur ne télécharge la bibliothèque qu’une fois.
 
 ## 4. Avant de diffuser dans un vrai magasin (toi)
 
 - Droits : accord **SCPP/SPPF** (reproduction, en tant que prestataire) et vérification **SACEM/SPRE** côté magasins.
-- Nom de domaine (ex. `onde.fr`) relié à Vercel et à AzuraCast.
+- Nom de domaine (ex. `onde.fr`) relié à Vercel, et un sous-domaine pour les flux (`ONDE_DOMAINE=flux.onde.fr` à l’installation de l’émetteur).
 - Matériel du pilote : une tablette ou un mini-PC par boutique.
 
 ## Ce qui vient ensuite (moi)

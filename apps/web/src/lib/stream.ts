@@ -56,6 +56,18 @@ const clean = (s: string) => s.replace(/["\\\n\r]/g, ' ').trim();
 const n2 = (v: number) => (Math.round(v * 100) / 100).toFixed(2);
 
 /**
+ * Nom du fichier sur le disque de l’émetteur (« onde:<nom>|<lien signé> ») : l’émetteur le garde en cache
+ * et ne le télécharge qu’une fois. Un fichier déposé ne change jamais : son chemin suffit à l’identifier.
+ * L’extension est donnée à part, car le lien signé ne permet pas de la deviner.
+ */
+export function cacheName(storagePath: string, trackId: string): string {
+  const dot = storagePath.lastIndexOf('.');
+  const ext = (dot > 0 ? storagePath.slice(dot + 1) : '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 5) || 'mp3';
+  const stem = (dot > 0 ? storagePath.slice(0, dot) : storagePath).replace(/[^A-Za-z0-9_-]/g, '_').slice(-100).replace(/^[_-]+/, '');
+  return `${stem.length >= 8 ? stem : trackId.replace(/[^A-Za-z0-9-]/g, '')}.${ext.length >= 2 ? ext : 'mp3'}`;
+}
+
+/**
  * Prochain titre du flux d’une enseigne, au format d’une requête annotée Liquidsoap :
  * points d’entrée et de sortie, durée de l’enchaînement, fondus, gain de normalisation.
  * Le titre est inscrit dans l’historique du flux dès qu’il est choisi.
@@ -200,9 +212,7 @@ export async function nextForStream(sb: SB, orgId: string): Promise<string | nul
       ['liq_fade_out', n2(Math.max(0.01, cross))],
       ['liq_amplify', `${n2(gain)} dB`]
     ];
-    // « onde:<extension>| » : l’émetteur télécharge le fichier avec la bonne extension (le lien signé ne la donne pas).
-    const ext = ((t.storage_path as string).split('.').pop() ?? 'mp3').toLowerCase().replace(/[^a-z0-9]/g, '') || 'mp3';
-    return `annotate:${meta.map(([k, v]) => `${k}="${v}"`).join(',')}:onde:${ext}|${signed.signedUrl}`;
+    return `annotate:${meta.map(([k, v]) => `${k}="${v}"`).join(',')}:onde:${cacheName(t.storage_path as string, t.id as string)}|${signed.signedUrl}`;
   }
   return null;
 }
@@ -218,6 +228,19 @@ export async function streamPlays(sb: SB, orgId: string, limit = 8) {
   return (data ?? []).map((p) => ({ ...p, duration_sec: Number(p.duration_sec ?? 0), cross_sec: Number(p.cross_sec ?? 0) }));
 }
 
+/**
+ * Les lecteurs sont servis en HTTPS : un navigateur n’y lit un flux qu’en HTTPS, ou en HTTP sur la machine
+ * elle-même (test sur un Mac). Une autre adresse en HTTP ferait échouer le lecteur à chaque essai.
+ */
+export function playableAddress(url: string): boolean {
+  try {
+    const u = new URL(url);
+    return u.protocol === 'https:' || (u.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(u.hostname));
+  } catch {
+    return false;
+  }
+}
+
 /** Adresse du flux de l’enseigne si un émetteur est en service. */
 export async function ondeStreamUrl(sb: SB, orgId: string): Promise<{ name: string; url: string } | null> {
   const [{ data: stream }, { data: emitter }, { data: org }] = await Promise.all([
@@ -227,5 +250,6 @@ export async function ondeStreamUrl(sb: SB, orgId: string): Promise<{ name: stri
   ]);
   if (!stream?.enabled || !emitter?.public_url || !emitter.last_seen_at) return null;
   if (Date.now() - Date.parse(emitter.last_seen_at as string) > EMITTER_ONLINE_MS) return null;
+  if (!playableAddress(emitter.public_url as string)) return null;
   return { name: (org?.name as string) ?? 'Flux', url: `${(emitter.public_url as string).replace(/\/+$/, '')}/${stream.mount}` };
 }

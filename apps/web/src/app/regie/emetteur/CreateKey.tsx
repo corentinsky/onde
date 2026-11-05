@@ -34,7 +34,7 @@ export function CreateKey({ base }: { base: string }) {
     <form action={action} className="actions" style={{ alignItems: 'end' }}>
       <label className="field" style={{ minWidth: 240 }}>
         <span>Nom de l’émetteur</span>
-        <input className="input" name="name" placeholder="Mac de Corentin" />
+        <input className="input" name="name" placeholder="Serveur principal" />
       </label>
       <button className="btn btn-primary" type="submit" disabled={pending}>{pending ? 'Création…' : 'Créer une clé'}</button>
       {state?.error && <span className="small" style={{ color: 'var(--danger)' }}>{state.error}</span>}

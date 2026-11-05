@@ -70,10 +70,16 @@ Le lecteur reçoit un fichier normal : identique dans toutes les boutiques, joua
 | Route | Rôle |
 |---|---|
 | `GET /api/emitter/config` | flux à diffuser (une ligne par enseigne) ; signal de vie, adresse publique |
-| `GET /api/emitter/next?org=` | titre suivant : `annotate:liq_cue_in,liq_cue_out,liq_cross_duration,liq_fade_in,liq_fade_out,liq_amplify…:onde:<ext>\|<lien signé>` |
+| `GET /api/emitter/next?org=` | titre suivant : `annotate:liq_cue_in,liq_cue_out,liq_cross_duration,liq_fade_in,liq_fade_out,liq_amplify…:onde:<fichier>\|<lien signé>` |
 | `POST /api/emitter/started?play=` | le titre vient de démarrer (titre en cours, historique `stream_plays`) |
 
 Clé de l’émetteur (`Authorization: Bearer`), créée dans Régie → Émetteur, stockée hachée (`emitters`).
+
+`<fichier>` est le nom du titre dans le stockage (identifiant + extension) : l’émetteur garde chaque titre sur
+son disque et ne le télécharge qu’une fois ; les titres non joués depuis 30 jours sont effacés. Sur un serveur,
+Caddy sert les flux en HTTPS (certificat Let’s Encrypt de l’adresse IP, ou d’un nom de domaine) et l’émetteur
+annonce à Onde la première adresse HTTPS valide. Les lecteurs ne reçoivent qu’une adresse qu’un navigateur
+peut lire depuis une page HTTPS (`playableAddress`).
 
 ## Spots magasin par magasin, sur un flux commun
 

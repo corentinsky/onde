@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { getSession, listIncidents, listSpots, listStoreStatus } from '@/lib/data';
 import { ago, incidentLabel, spotState, plural } from '@/lib/format';
-import { EMITTER_ONLINE_MS } from '@/lib/stream';
+import { EMITTER_ONLINE_MS, playableAddress } from '@/lib/stream';
 import { isConfigured, supabaseService } from '@/lib/supabase/server';
 
 export const metadata = { title: 'Vue d’ensemble' };
@@ -15,7 +15,10 @@ async function antenne(orgId: string) {
     sb.from('streams').select('enabled').eq('org_id', orgId).maybeSingle(),
     sb.from('stream_plays').select('title, artist, started_at, queued_at').eq('org_id', orgId).order('queued_at', { ascending: false }).limit(3)
   ]);
-  const live = (emitters ?? []).some((e) => e.last_seen_at && Date.now() - Date.parse(e.last_seen_at) < EMITTER_ONLINE_MS) && stream?.enabled !== false;
+  // En service : signal récent et adresse que les lecteurs (HTTPS) peuvent lire.
+  const live =
+    (emitters ?? []).some((e) => e.last_seen_at && Date.now() - Date.parse(e.last_seen_at) < EMITTER_ONLINE_MS && e.public_url && playableAddress(e.public_url)) &&
+    stream?.enabled !== false;
   return {
     live,
     installed: (emitters ?? []).length > 0,

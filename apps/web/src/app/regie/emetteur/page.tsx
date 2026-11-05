@@ -1,6 +1,6 @@
 import { headers } from 'next/headers';
 import { getSession } from '@/lib/data';
-import { EMITTER_ONLINE_MS } from '@/lib/stream';
+import { EMITTER_ONLINE_MS, playableAddress } from '@/lib/stream';
 import { isConfigured, supabaseServer } from '@/lib/supabase/server';
 import { revokeEmitter, saveStream } from '../emetteur-actions';
 import { CreateKey } from './CreateKey';
@@ -34,7 +34,9 @@ export default async function Emetteur({ searchParams }: { searchParams: Promise
     sb.from('ambiences').select('id, org_id, name').order('name')
   ]);
   const online = (emitters ?? []).filter((e) => e.last_seen_at && Date.now() - Date.parse(e.last_seen_at) < EMITTER_ONLINE_MS);
-  const live = online.find((e) => e.public_url) ?? null;
+  const live = online.find((e) => e.public_url && playableAddress(e.public_url)) ?? null;
+  // En marche, mais pas encore joignable en HTTPS (certificat en cours, pare-feu) : les boutiques gardent le cache.
+  const waiting = live ? null : (online.find((e) => e.public_url) ?? null);
   const byOrg = new Map((streams ?? []).map((s) => [s.org_id as string, s]));
   const plays = await Promise.all(
     (orgs ?? []).map(async (o) => {
@@ -60,10 +62,22 @@ export default async function Emetteur({ searchParams }: { searchParams: Promise
           <h2>État</h2>
           <span className="status">
             <span className="dot" style={{ background: live ? 'var(--ok)' : 'var(--warn)' }} />
-            {live ? `En service · signal ${ago(live.last_seen_at)}` : (emitters ?? []).length ? 'Hors service : les boutiques jouent la musique en cache' : 'Aucun émetteur installé'}
+            {live
+              ? `En service · signal ${ago(live.last_seen_at)}`
+              : waiting
+                ? 'Démarré, en attente de son adresse HTTPS'
+                : (emitters ?? []).length
+                  ? 'Hors service : les boutiques jouent la musique en cache'
+                  : 'Aucun émetteur installé'}
           </span>
         </div>
         {live && <p className="sub">Adresse des flux : <strong>{live.public_url}</strong></p>}
+        {waiting && (
+          <p className="sub">
+            Le certificat HTTPS arrive en une à deux minutes après l’installation. S’il tarde, ouvrez les ports 80 et 443 dans le pare-feu de l’hébergeur.
+            En attendant, les boutiques jouent la musique en cache.
+          </p>
+        )}
       </section>
 
       <section className="card">
@@ -129,12 +143,18 @@ export default async function Emetteur({ searchParams }: { searchParams: Promise
 
       <section className="card">
         <h2>Installer l’émetteur</h2>
-        <p className="sub">Pour tester sur un Mac : l’émetteur tourne tant que le Mac est allumé, et les flux s’écoutent sur ce Mac.</p>
+        <p className="sub">
+          Sur un petit serveur Linux (1 cœur et 2 Go de mémoire suffisent) : l’émetteur s’installe tout seul, garde les titres sur son disque
+          et obtient son certificat HTTPS. Les boutiques l’écoutent où qu’elles soient.
+        </p>
         <ol className="small" style={{ lineHeight: 1.8, paddingLeft: 18, margin: '12px 0 18px' }}>
-          <li>Installez <a href="https://www.docker.com/products/docker-desktop/" target="_blank" rel="noreferrer">Docker Desktop</a>, ouvrez-le et attendez qu’il soit prêt.</li>
+          <li>Louez un serveur sous Ubuntu 24.04 et notez son adresse IP et son mot de passe root.</li>
           <li>Créez une clé ci-dessous et copiez la commande.</li>
-          <li>Collez-la dans le Terminal. L’émetteur apparaît « en service » d’ici une minute.</li>
+          <li>Sur votre Mac, ouvrez le Terminal, tapez <code>ssh root@adresse-ip</code> puis le mot de passe, et collez la commande. Comptez cinq minutes.</li>
         </ol>
+        <p className="small muted" style={{ marginBottom: 18 }}>
+          Pour un essai sur un Mac : installez <a href="https://www.docker.com/products/docker-desktop/" target="_blank" rel="noreferrer">Docker Desktop</a> et collez la même commande dans le Terminal. Les flux ne s’écoutent alors que sur ce Mac.
+        </p>
         <CreateKey base={base} />
       </section>
 

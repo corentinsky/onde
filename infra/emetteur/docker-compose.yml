@@ -11,3 +11,9 @@ services:
       ONDE_URL: ${ONDE_URL:-https://onde-rust.vercel.app}
       ONDE_CLE: ${ONDE_CLE:?Clé manquante (Régie → Émetteur → Créer une clé)}
       PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8000}
+    volumes:
+      # Titres gardés sur le disque : téléchargés une fois, conservés entre les redémarrages.
+      - titres:/var/cache/onde
+
+volumes:
+  titres:
