@@ -116,6 +116,7 @@ def stream(line) =
     mount=mount,
     name=name,
     description="Onde",
+    encoding="UTF-8",
     s
   )
 end

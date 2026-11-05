@@ -13,7 +13,7 @@ import { StreamDirector, type OndePlay, type StreamTrack } from './StreamDirecto
 import { streamSupported } from './StreamPlayer';
 import './player.css';
 
-const VERSION = '0.4.0-web';
+const VERSION = '0.4.1-web';
 const keys = (p: string) => ({
   token: `${p}token`,
   schedule: `${p}schedule`,
@@ -418,8 +418,8 @@ export function Player({ demo }: { demo: boolean }) {
           logPlay({
             track_id: t.play.track_id,
             playlist_id: t.play.playlist_id ?? '',
-            title: t.title,
-            artist: t.artist,
+            title: t.play.title,
+            artist: t.play.artist,
             isrc: t.play.isrc,
             played_at: new Date().toISOString(),
             duration_sec: Math.round(t.play.duration_sec * 10) / 10

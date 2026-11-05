@@ -35,7 +35,15 @@ const MAX_LAG = 90;
 /** Sans son pendant ce délai, le flux est considéré coupé. */
 const DOWN_AFTER_MS = 10_000;
 
-const norm = (s: string) => s.trim().toLowerCase();
+/**
+ * Clé de rapprochement entre le titre lu dans le flux et l’historique de l’émetteur :
+ * sans accents, casse ni ponctuation (les métadonnées du flux peuvent perdre des caractères en route).
+ */
+export function trackKey(artist: string, title: string): string {
+  const raw = `${artist} ${title}`.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const loose = raw.replace(/[^\p{L}\p{N}]+/gu, '');
+  return loose || raw.trim();
+}
 
 export class StreamDirector {
   private ctx = new AudioContext();
@@ -174,7 +182,10 @@ export class StreamDirector {
   }
 
   private match(b: { title: string; artist: string }): OndePlay | null {
-    return this.plays.find((x) => norm(x.title) === norm(b.title) && norm(x.artist) === norm(b.artist)) ?? null;
+    const key = trackKey(b.artist, b.title);
+    const same = this.plays.filter((x) => trackKey(x.artist, x.title) === key);
+    // Le même titre peut figurer deux fois (émetteur relancé) : on préfère celui réellement lancé, le plus récent.
+    return same.find((x) => x.started_at) ?? same[0] ?? null;
   }
 
   private currentPlay(): OndePlay | null {

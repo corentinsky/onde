@@ -21,6 +21,10 @@
     <port>8001</port>
     <bind-address>127.0.0.1</bind-address>
   </listen-socket>
+  <!-- Titres en UTF-8 dans le flux (Icecast suppose Latin-1 par défaut pour le MP3). -->
+  <mount type="default">
+    <charset>UTF-8</charset>
+  </mount>
   <http-headers>
     <header name="Access-Control-Allow-Origin" value="*" />
     <header name="Access-Control-Allow-Headers" value="Icy-MetaData" />

@@ -26,6 +26,15 @@ const META_GRANULARITY = 1;
 export const streamSupported = () =>
   typeof window !== 'undefined' && 'MediaSource' in window && MediaSource.isTypeSupported('audio/mpeg') && typeof ReadableStream !== 'undefined';
 
+/** Titre ICY : UTF-8 si valide, sinon Latin-1 (ancien émetteur, ou Icecast réglé par défaut). */
+function decodeMeta(bytes: Uint8Array): string {
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch {
+    return new TextDecoder('windows-1252').decode(bytes);
+  }
+}
+
 function parseTitle(meta: string): { title: string; artist: string } {
   const m = meta.match(/StreamTitle='(.*?)';/s);
   const full = (m?.[1] ?? '').trim();
@@ -106,7 +115,7 @@ export class StreamPlayer {
             metaLeft -= n;
             i += n;
             if (metaLeft === 0) {
-              this.queue.push(parseTitle(new TextDecoder().decode(new Uint8Array(meta)).replace(/\0+$/, '')));
+              this.queue.push(parseTitle(decodeMeta(new Uint8Array(meta)).replace(/\0+$/, '')));
               metaLeft = -1;
               audioLeft = metaint;
             }
