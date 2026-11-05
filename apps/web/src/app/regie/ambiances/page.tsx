@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { plural } from '@/lib/format';
 import { getSession } from '@/lib/data';
 import { DAYS, listAmbiences, listPlaylists, orderLabel, typeLabel, type PlaylistRow } from '@/lib/music';
 import { createPlaylist, saveAmbience } from '../musique-actions';
@@ -29,7 +30,7 @@ export default async function Ambiances({ searchParams }: { searchParams: Promis
     <>
       <div className="page-head">
         <div>
-          <div className="eyebrow">{org.name} · {ambiences.length} ambiances</div>
+          <div className="eyebrow">{org.name} · {plural(ambiences.length, 'ambiance')}</div>
           <h1>Ambiances et listes</h1>
           <p className="lead">Une ambiance est une radio : ses listes de lecture, son enchaînement et son volume. La journée type décide quelle ambiance passe à quelle heure.</p>
         </div>

@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { getSession, listIncidents, listSpots, listStoreStatus } from '@/lib/data';
-import { ago, incidentLabel, spotState } from '@/lib/format';
+import { ago, incidentLabel, spotState, plural } from '@/lib/format';
 import { EMITTER_ONLINE_MS } from '@/lib/stream';
 import { isConfigured, supabaseService } from '@/lib/supabase/server';
 
@@ -41,7 +41,7 @@ export default async function Overview() {
     <>
       <div className="page-head">
         <div>
-          <div className="eyebrow">{org.name} · {stores.length} boutiques</div>
+          <div className="eyebrow">{org.name} · {plural(stores.length, 'boutique')}</div>
           <h1>Vue d’ensemble</h1>
         </div>
         <Link className="btn btn-primary" href="/regie/spots#nouveau">Nouveau spot national</Link>

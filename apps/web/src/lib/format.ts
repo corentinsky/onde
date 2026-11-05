@@ -79,3 +79,6 @@ export function period(s: { starts_on: string | null; ends_on: string | null }):
   if (s.starts_on) return `à partir du ${dm(s.starts_on)}`;
   return 'sans date de fin';
 }
+
+/** « 1 boutique », « 6 boutiques ». */
+export const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n > 1 ? many : one}`;

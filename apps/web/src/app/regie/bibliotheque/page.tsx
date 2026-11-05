@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { plural } from '@/lib/format';
 import { gainFor } from '@onde/audio';
 import { getSession } from '@/lib/data';
 import { PAGE_SIZE, libraryStats, listAmbiences, listPlaylists, listTracks, mmss, warningLabel } from '@/lib/music';
@@ -29,7 +30,7 @@ export default async function Bibliotheque({ searchParams }: { searchParams: Pro
     <>
       <div className="page-head">
         <div>
-          <div className="eyebrow">Commune à toutes les enseignes · {stats.count} titres · {Math.floor(totalMin / 60)} h {String(totalMin % 60).padStart(2, '0')}</div>
+          <div className="eyebrow">Commune à toutes les enseignes · {plural(stats.count, 'titre')} · {Math.floor(totalMin / 60)} h {String(totalMin % 60).padStart(2, '0')}</div>
           <h1>Bibliothèque</h1>
           <p className="lead">Déposez vos fichiers. Onde mesure le volume, repère le début et la fin de chaque titre et prépare les enchaînements. Vous ne corrigez que les exceptions.</p>
         </div>

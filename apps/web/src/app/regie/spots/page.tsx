@@ -1,5 +1,5 @@
 import { getSession, listSpots, listStoreStatus } from '@/lib/data';
-import { frequency, period, spotState } from '@/lib/format';
+import { frequency, period, spotState, plural } from '@/lib/format';
 import { isConfigured, supabaseServer } from '@/lib/supabase/server';
 import { listVoices, voiceConfigured } from '@/lib/voice';
 import { createSpot, setSpotStatus, startEmergency, stopEmergency, toggleHqSpots } from '../actions';
@@ -36,7 +36,7 @@ export default async function Spots() {
     <>
       <div className="page-head">
         <div>
-          <div className="eyebrow">{org.name} · {stores.length} boutiques</div>
+          <div className="eyebrow">{org.name} · {plural(stores.length, 'boutique')}</div>
           <h1>Spots nationaux</h1>
           <p className="lead">Créés une fois, joués dans toutes les boutiques. Chaque lecteur les place entre deux titres, avant les messages des boutiques.</p>
         </div>
@@ -47,7 +47,7 @@ export default async function Spots() {
           <div>
             <div className="status sub">
               <span className="dot" style={{ background: org.hq_spots_enabled ? 'var(--ok)' : 'var(--warn)' }} />
-              {org.hq_spots_enabled ? `Actifs dans les ${stores.length} boutiques` : 'Suspendus dans tout le réseau'}
+              {org.hq_spots_enabled ? stores.length > 1 ? `Actifs dans les ${stores.length} boutiques` : 'Actifs dans la boutique' : 'Suspendus dans tout le réseau'}
             </div>
             <div style={{ fontSize: 22, fontWeight: 600, letterSpacing: '-0.02em', marginTop: 6 }}>Spots du siège</div>
             <div className="small muted" style={{ marginTop: 4 }}>Un geste pour tout suspendre. La musique et les messages des boutiques continuent.</div>
@@ -153,7 +153,7 @@ export default async function Spots() {
                 <label><input type="radio" name="mode" value="sync" /><span>À la seconde, partout</span></label>
               </div>
             </fieldset>
-            <button className="btn btn-primary" type="submit" style={{ alignSelf: 'flex-start' }}>Programmer dans les {stores.length} boutiques</button>
+            <button className="btn btn-primary" type="submit" style={{ alignSelf: 'flex-start' }}>{stores.length > 1 ? `Programmer dans les ${stores.length} boutiques` : 'Programmer dans la boutique'}</button>
           </form>
         </section>
       </div>
