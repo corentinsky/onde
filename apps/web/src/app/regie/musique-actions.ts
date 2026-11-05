@@ -79,7 +79,7 @@ export async function saveAmbience(form: FormData) {
     })
     .eq('id', str(form, 'id'));
   if (error) throw error;
-  done('/regie/ambiances');
+  done('/regie/ambiances?enregistre=1');
 }
 
 // ───────────── Listes ─────────────
@@ -174,7 +174,7 @@ export async function saveDaypart(form: FormData) {
   const id = str(form, 'id');
   const { error } = id ? await sb.from('dayparts').update(row).eq('id', id) : await sb.from('dayparts').insert({ ...row, org_id: str(form, 'org_id') });
   if (error) throw error;
-  done('/regie/programmation');
+  done('/regie/programmation?enregistre=1');
 }
 
 export async function deleteDaypart(form: FormData) {

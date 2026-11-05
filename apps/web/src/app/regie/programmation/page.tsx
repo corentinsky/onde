@@ -6,7 +6,8 @@ export const metadata = { title: 'Journée type' };
 
 const PALETTE = ['#0071e3', '#5e5ce6', '#34c759', '#ff9f0a', '#bf5af2', '#64d2ff'];
 
-export default async function Programmation() {
+export default async function Programmation({ searchParams }: { searchParams: Promise<{ enregistre?: string }> }) {
+  const { enregistre } = await searchParams;
   const { org } = await getSession();
   if (!org) return null;
   const [ambiences, dayparts] = await Promise.all([listAmbiences(org.id), listDayparts(org.id)]);
@@ -56,6 +57,7 @@ export default async function Programmation() {
           <h1>Journée type</h1>
           <p className="lead">Quelle ambiance passe à quelle heure, dans toutes les boutiques de l’enseigne. Hors créneau : {fallback}.</p>
         </div>
+        {enregistre && <span className="tag" role="status">Enregistré</span>}
       </div>
 
       <section className="card">

@@ -19,7 +19,8 @@ function when(p: PlaylistRow) {
   return parts.join(' · ') || 'Toujours';
 }
 
-export default async function Ambiances() {
+export default async function Ambiances({ searchParams }: { searchParams: Promise<{ enregistre?: string }> }) {
+  const { enregistre } = await searchParams;
   const { org } = await getSession();
   if (!org) return null;
   const [ambiences, playlists] = await Promise.all([listAmbiences(org.id), listPlaylists(org.id)]);
@@ -32,7 +33,10 @@ export default async function Ambiances() {
           <h1>Ambiances et listes</h1>
           <p className="lead">Une ambiance est une radio : ses listes de lecture, son enchaînement et son volume. La journée type décide quelle ambiance passe à quelle heure.</p>
         </div>
-        <Link className="btn btn-secondary" href="/regie/programmation">Journée type</Link>
+        <div className="actions">
+          {enregistre && <span className="tag" role="status">Enregistré</span>}
+          <Link className="btn btn-secondary" href="/regie/programmation">Journée type</Link>
+        </div>
       </div>
 
       {ambiences.length === 0 && <div className="card empty">Aucune ambiance pour cette enseigne.</div>}
