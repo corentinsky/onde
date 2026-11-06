@@ -3,6 +3,7 @@ import { localTimeIn } from '@onde/rules';
 import { allRows, chunks, inChunks } from '@/lib/batch';
 import { authDevice, storeStream } from '@/lib/device';
 import { trackUrls } from '@/lib/library';
+import { playableIds } from '@/lib/rotation';
 import { ondeStreamUrl } from '@/lib/stream';
 import { supabaseService } from '@/lib/supabase/server';
 
@@ -76,18 +77,20 @@ async function musicFor(sb: ReturnType<typeof supabaseService>, orgId: string, s
   const items = (
     await Promise.all(
       chunks(listIds, 50).map((ids) =>
-        allRows<{ playlist_id: string; track_id: string; position: number }>((from, to) =>
-          sb.from('playlist_tracks').select('playlist_id, track_id, position').in('playlist_id', ids).order('playlist_id').order('position').order('track_id').range(from, to)
+        allRows<{ playlist_id: string; track_id: string; position: number; rested_until: string | null }>((from, to) =>
+          sb.from('playlist_tracks').select('playlist_id, track_id, position, rested_until').in('playlist_id', ids).order('playlist_id').order('position').order('track_id').range(from, to)
         )
       )
     )
   ).flat();
-  const byList = new Map<string, string[]>();
+  // Titres au repos (rotation automatique) écartés.
+  const grouped = new Map<string, typeof items>();
   for (const it of items) {
-    const l = byList.get(it.playlist_id);
-    if (l) l.push(it.track_id);
-    else byList.set(it.playlist_id, [it.track_id]);
+    const l = grouped.get(it.playlist_id);
+    if (l) l.push(it);
+    else grouped.set(it.playlist_id, [it]);
   }
+  const byList = new Map([...grouped].map(([id, l]) => [id, playableIds(l)]));
 
   const lists = (playlists ?? []).map((p) => {
     return {

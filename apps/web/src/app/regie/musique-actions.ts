@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { removeTrackFile } from '@/lib/library';
+import { rotatePlaylist } from '@/lib/rotation';
 import { isConfigured, supabaseServer } from '@/lib/supabase/server';
 
 const str = (f: FormData, k: string) => String(f.get(k) ?? '').trim();
@@ -126,11 +127,22 @@ export async function savePlaylist(form: FormData) {
       end_date: str(form, 'end_date') || null,
       avoid_duplicates: form.get('avoid_duplicates') === 'on',
       is_jingle: form.get('is_jingle') === 'on',
-      enabled: form.get('enabled') === 'on'
+      enabled: form.get('enabled') === 'on',
+      rotation_days: str(form, 'rotation_days') ? clamp(Math.round(numOr(form, 'rotation_days', 15)!), 1, 365) : null,
+      rotation_share: clamp(Math.round(numOr(form, 'rotation_share', 20)!), 5, 60),
+      rotation_rest_days: clamp(Math.round(numOr(form, 'rotation_rest_days', 30)!), 1, 365)
     })
     .eq('id', id);
   if (error) throw error;
   done(`/regie/ambiances/listes/${id}?enregistre=1`);
+}
+
+/** Renouvelle la liste tout de suite, sans attendre l’échéance. */
+export async function rotateNow(form: FormData) {
+  const id = str(form, 'id');
+  const sb = await db();
+  await rotatePlaylist(sb, id, 'manual');
+  done(`/regie/ambiances/listes/${id}?renouvele=1`);
 }
 
 export async function deletePlaylist(form: FormData) {

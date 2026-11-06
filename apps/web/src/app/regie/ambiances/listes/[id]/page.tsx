@@ -2,8 +2,10 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { previewQueue, seededRng, type Playlist } from '@onde/rules';
 import { getSession } from '@/lib/data';
-import { DAYS, getTracksByIds, listAmbiences, listPlaylists, listTracks, mmss, orderLabel, toMin, typeLabel, type PlaylistRow } from '@/lib/music';
-import { addToPlaylist, deletePlaylist, removeFromPlaylist, savePlaylist } from '../../../musique-actions';
+import { DAYS, getTracksByIds, listAmbiences, listPlaylists, listRotations, listTracks, mmss, orderLabel, toMin, typeLabel, type PlaylistRow } from '@/lib/music';
+import { addToPlaylist, deletePlaylist, removeFromPlaylist, rotateNow, savePlaylist } from '../../../musique-actions';
+
+const shortDate = (d: string) => new Date(`${d.slice(0, 10)}T12:00:00Z`).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
 
 export const metadata = { title: 'Liste de lecture' };
 
@@ -20,17 +22,22 @@ const toEngine = (p: PlaylistRow): Playlist => ({
   avoidDuplicates: p.avoid_duplicates,
   isJingle: p.is_jingle,
   enabled: p.enabled,
-  trackIds: p.track_ids
+  // Les titres au repos (rotation automatique) ne passent pas.
+  trackIds: p.track_ids.filter((t) => !p.resting[t])
 });
 
-export default async function PlaylistPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ q?: string; enregistre?: string }> }) {
+export default async function PlaylistPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ q?: string; enregistre?: string; renouvele?: string }> }) {
   const { id } = await params;
-  const { q = '', enregistre } = await searchParams;
+  const { q = '', enregistre, renouvele } = await searchParams;
   const { org } = await getSession();
   if (!org) return null;
   const [playlists, ambiences, library] = await Promise.all([listPlaylists(org.id), listAmbiences(org.id), listTracks({ q, size: 200 })]);
   const p = playlists.find((x) => x.id === id);
   if (!p) notFound();
+  const rotations = await listRotations(p.id);
+  const last = rotations[0];
+  const restingCount = Object.keys(p.resting).length;
+  const nextRotation = p.rotation_days ? (p.rotated_at ? new Date(Date.parse(p.rotated_at) + p.rotation_days * 86_400_000).toISOString().slice(0, 10) : null) : null;
   const amb = ambiences.find((a) => a.id === p.ambience_id);
   // Tous les titres des listes de l’ambiance, quelle que soit la taille de la bibliothèque.
   const sameAmbRows = playlists.filter((x) => x.ambience_id === p.ambience_id);
@@ -63,6 +70,7 @@ export default async function PlaylistPage({ params, searchParams }: { params: P
           <h1>{p.name}</h1>
         </div>
         {enregistre && <span className="tag" role="status">Enregistré</span>}
+        {renouvele && <span className="tag" role="status">Liste renouvelée</span>}
       </div>
 
       <div className="row">
@@ -103,6 +111,24 @@ export default async function PlaylistPage({ params, searchParams }: { params: P
             </div>
           </fieldset>
 
+          <div style={{ fontWeight: 600, marginTop: 6 }}>Rotation automatique</div>
+          <p className="small muted" style={{ margin: 0 }}>
+            À chaque échéance, les titres les plus diffusés passent au repos et ceux dont le repos est fini reviennent. Les titres ajoutés depuis la dernière rotation sont protégés.
+          </p>
+          <div className="form-grid">
+            <label className="field"><span>Renouveler</span>
+              <select className="select" name="rotation_days" defaultValue={p.rotation_days ?? ''}>
+                <option value="">Jamais</option>
+                <option value="7">Toutes les semaines</option>
+                <option value="15">Tous les 15 jours</option>
+                <option value="30">Tous les mois</option>
+                {p.rotation_days && ![7, 15, 30].includes(p.rotation_days) && <option value={p.rotation_days}>Tous les {p.rotation_days} jours</option>}
+              </select>
+            </label>
+            <label className="field"><span>Part mise au repos (%)</span><input className="input" type="number" min={5} max={60} name="rotation_share" defaultValue={p.rotation_share} /></label>
+            <label className="field"><span>Durée du repos (jours)</span><input className="input" type="number" min={1} max={365} name="rotation_rest_days" defaultValue={p.rotation_rest_days} /></label>
+          </div>
+
           {[
             ['avoid_duplicates', 'Éviter les doublons', 'Respecte les espacements titre et artiste de l’ambiance.', p.avoid_duplicates],
             ['is_jingle', 'Jingle', 'Ne compte pas comme un titre et n’apparaît pas dans les métadonnées.', p.is_jingle],
@@ -137,6 +163,35 @@ export default async function PlaylistPage({ params, searchParams }: { params: P
       </div>
 
       <section className="card">
+        <div className="page-head" style={{ alignItems: 'center' }}>
+          <h2>Rotation</h2>
+          <form action={rotateNow}>
+            <input type="hidden" name="id" value={p.id} />
+            <button className="btn btn-secondary btn-small" type="submit" disabled={inList.length === 0}>Renouveler maintenant</button>
+          </form>
+        </div>
+        <p className="sub">
+          {p.rotation_days ? `Automatique tous les ${p.rotation_days} jours` : 'Automatique désactivée'}
+          {nextRotation ? ` · prochaine le ${shortDate(nextRotation)}` : p.rotation_days ? ' · première demain matin' : ''}
+          {` · ${inList.length - restingCount} titre${inList.length - restingCount > 1 ? 's' : ''} en rotation, ${restingCount} au repos`}
+        </p>
+        {last ? (
+          <div className="small" style={{ lineHeight: 1.7 }}>
+            <div className="muted">
+              Dernière rotation le {new Date(last.ran_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', timeZone: 'Europe/Paris' })}
+              {last.trigger === 'manual' ? ' (à la main)' : ''} : {last.rested.length} au repos, {last.returned.length} de retour.
+            </div>
+            {last.rested.length > 0 && (
+              <div>Au repos : {last.rested.slice(0, 12).map((r) => `${r.title} (${r.plays} passage${r.plays > 1 ? 's' : ''})`).join(', ')}{last.rested.length > 12 ? '…' : ''}</div>
+            )}
+            {last.returned.length > 0 && <div>De retour : {last.returned.slice(0, 12).map((r) => r.title).join(', ')}{last.returned.length > 12 ? '…' : ''}</div>}
+          </div>
+        ) : (
+          <div className="small muted">Aucune rotation pour l’instant.</div>
+        )}
+      </section>
+
+      <section className="card">
         <div className="page-head" style={{ alignItems: 'baseline' }}>
           <h2>Titres de la liste ({inList.length})</h2>
           <span className="small muted">{mmss(inList.reduce((a, t) => a + t.cue_out - t.cue_in, 0), 0)} au total</span>
@@ -149,6 +204,7 @@ export default async function PlaylistPage({ params, searchParams }: { params: P
                 <span className="small muted" style={{ marginRight: 10 }}>{i + 1}</span>
                 <Link href={`/regie/bibliotheque/${t.id}`} style={{ fontWeight: 500 }}>{t.title}</Link>
                 <span className="small muted"> · {t.artist} · {mmss(t.cue_out - t.cue_in, 0)}</span>
+                {p.resting[t.id] && <span className="tag" style={{ marginLeft: 8 }}>Au repos jusqu’au {shortDate(p.resting[t.id])}</span>}
               </div>
               <form action={removeFromPlaylist}>
                 <input type="hidden" name="playlist_id" value={p.id} />

@@ -122,3 +122,16 @@ Code : `packages/audio` (analyse, testée sur les signaux de référence EBU 334
 (choix du titre, testé), `apps/web/src/lib/stream.ts` (titre suivant du flux), `infra/emetteur` (Liquidsoap),
 `apps/web/src/app/lecteur/StreamPlayer.ts` et `StreamDirector.ts` (écoute du flux, spots),
 `MusicEngine.ts` (musique en cache, secours).
+
+
+## Rotation automatique des listes
+
+Chaque liste peut se renouveler seule (7, 15 ou 30 jours ; `playlists.rotation_days`). Chaque matin, la tâche
+planifiée de Vercel (`vercel.json` → `/api/cron/rotation`) traite les listes dont l’échéance est arrivée
+(`lib/rotation.ts`) : les titres les plus diffusés depuis la dernière rotation (flux de l’enseigne, sinon passages
+en boutique dédoublonnés) passent au repos (`playlist_tracks.rested_until`, 30 jours par défaut), ceux dont le
+repos est fini reviennent, les titres ajoutés depuis la dernière rotation sont protégés, et la moitié de la liste
+au moins reste en rotation (règles pures et testées : `packages/rules/src/rotation.ts`). Les titres au repos ne
+sont ni diffusés par l’émetteur ni proposés aux lecteurs. Historique : `playlist_rotations`, affiché sur la fiche
+de la liste, avec un bouton « Renouveler maintenant ». Avec `CRON_SECRET` défini sur Vercel, seul Vercel peut
+lancer la tâche ; sans lui, un appel extérieur ne fait que les rotations déjà dues.

@@ -1,5 +1,6 @@
 import 'server-only';
 import { allRows, chunks, inChunks } from './batch';
+import { todayParis } from './format';
 import { trackUrl } from './library';
 import { isConfigured, supabaseServer } from './supabase/server';
 
@@ -60,6 +61,12 @@ export interface PlaylistRow {
   is_jingle: boolean;
   enabled: boolean;
   track_ids: string[];
+  /** Titres au repos (rotation automatique) : date de retour. */
+  resting: Record<string, string>;
+  rotation_days: number | null;
+  rotation_share: number;
+  rotation_rest_days: number;
+  rotated_at: string | null;
 }
 
 export interface DaypartRow {
@@ -155,19 +162,26 @@ export async function listPlaylists(orgId: string): Promise<PlaylistRow[]> {
   const items = (
     await Promise.all(
       chunks((data ?? []).map((p) => p.id as string), 50).map((ids) =>
-        allRows<{ playlist_id: string; track_id: string }>((from, to) =>
-          sb.from('playlist_tracks').select('playlist_id, track_id').in('playlist_id', ids).order('playlist_id').order('position').order('track_id').range(from, to)
+        allRows<{ playlist_id: string; track_id: string; rested_until: string | null }>((from, to) =>
+          sb.from('playlist_tracks').select('playlist_id, track_id, rested_until').in('playlist_id', ids).order('playlist_id').order('position').order('track_id').range(from, to)
         )
       )
     )
   ).flat();
   const byList = new Map<string, string[]>();
+  const resting = new Map<string, Record<string, string>>();
+  const today = todayParis();
   for (const it of items) {
     const l = byList.get(it.playlist_id);
     if (l) l.push(it.track_id);
     else byList.set(it.playlist_id, [it.track_id]);
+    if (it.rested_until && it.rested_until > today) {
+      const r = resting.get(it.playlist_id) ?? {};
+      r[it.track_id] = it.rested_until;
+      resting.set(it.playlist_id, r);
+    }
   }
-  return (data ?? []).map((p) => ({ ...p, track_ids: byList.get(p.id as string) ?? [] }) as PlaylistRow);
+  return (data ?? []).map((p) => ({ ...p, track_ids: byList.get(p.id as string) ?? [], resting: resting.get(p.id as string) ?? {} }) as PlaylistRow);
 }
 
 export async function listDayparts(orgId: string): Promise<DaypartRow[]> {
@@ -240,3 +254,26 @@ export const warningLabel: Record<string, string> = {
   long_outro_silence: 'Long silence à la fin',
   very_short: 'Très court'
 };
+
+export interface RotationRow {
+  ran_at: string;
+  trigger: 'auto' | 'manual';
+  rested: { track_id: string; title: string; artist: string; plays: number; until: string }[];
+  returned: { track_id: string; title: string; artist: string }[];
+  active_count: number;
+  total_count: number;
+}
+
+/** Dernières rotations d’une liste. */
+export async function listRotations(playlistId: string, limit = 3): Promise<RotationRow[]> {
+  if (!isConfigured) return [];
+  const sb = await supabaseServer();
+  const { data, error } = await sb
+    .from('playlist_rotations')
+    .select('ran_at, trigger, rested, returned, active_count, total_count')
+    .eq('playlist_id', playlistId)
+    .order('ran_at', { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return (data ?? []) as RotationRow[];
+}

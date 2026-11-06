@@ -227,3 +227,26 @@ reset role;
 select pg_temp.as_user('f0000000-0000-4000-8000-000000000004');
 select pg_temp.check((select count(*) from storage.objects where bucket_id = 'spots') = 0, 'une autre enseigne ne voit pas les fichiers Aubert');
 reset role;
+
+-- ───────────── Rotations des listes ─────────────
+select pg_temp.as_user('f0000000-0000-4000-8000-000000000001');
+insert into public.playlist_rotations (org_id, playlist_id, active_count, total_count)
+select org_id, id, 10, 12 from public.playlists where org_id = 'a0000000-0000-4000-8000-000000000001' limit 1;
+select pg_temp.check((select count(*) from public.playlist_rotations) = 1, 'la régie enregistre une rotation');
+reset role;
+
+select pg_temp.as_user('f0000000-0000-4000-8000-000000000002');
+select pg_temp.check((select count(*) from public.playlist_rotations) = 1, 'le siège voit les rotations de son enseigne');
+do $$ begin
+  begin
+    insert into public.playlist_rotations (org_id, playlist_id, active_count, total_count)
+    select org_id, id, 1, 1 from public.playlists limit 1;
+    raise exception 'ÉCHEC : le siège a pu écrire une rotation';
+  exception when insufficient_privilege then raise notice 'ok : seule la régie écrit les rotations';
+  end;
+end $$;
+reset role;
+
+select pg_temp.as_user('f0000000-0000-4000-8000-000000000004');
+select pg_temp.check((select count(*) from public.playlist_rotations) = 0, 'une autre enseigne ne voit pas les rotations Aubert');
+reset role;

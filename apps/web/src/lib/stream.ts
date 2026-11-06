@@ -4,6 +4,7 @@ import { ambienceAt, emptyRotation, localTimeIn, nextTrack, type Playlist, type 
 import { allRows, chunks, inChunks } from './batch';
 import type { supabaseService } from './supabase/server';
 import { trackUrl } from './library';
+import { playableIds } from './rotation';
 
 type SB = ReturnType<typeof supabaseService>;
 
@@ -99,8 +100,8 @@ export async function nextForStream(sb: SB, orgId: string): Promise<string | nul
   const items = (
     await Promise.all(
       chunks(listIds, 50).map((ids) =>
-        allRows<{ playlist_id: string; track_id: string }>((from, to) =>
-          sb.from('playlist_tracks').select('playlist_id, track_id').in('playlist_id', ids).order('playlist_id').order('position').order('track_id').range(from, to)
+        allRows<{ playlist_id: string; track_id: string; rested_until: string | null }>((from, to) =>
+          sb.from('playlist_tracks').select('playlist_id, track_id, rested_until').in('playlist_id', ids).order('playlist_id').order('position').order('track_id').range(from, to)
         )
       )
     )
@@ -113,13 +114,15 @@ export async function nextForStream(sb: SB, orgId: string): Promise<string | nul
       .eq('enabled', true)
   );
   const trackById = new Map(rows.map((t) => [t.id as string, t]));
-  const byList = new Map<string, string[]>();
+  // Titres au repos (rotation automatique) écartés ; une liste entièrement au repos reste jouée.
+  const grouped = new Map<string, typeof items>();
   for (const it of items) {
     if (!trackById.has(it.track_id)) continue;
-    const l = byList.get(it.playlist_id);
-    if (l) l.push(it.track_id);
-    else byList.set(it.playlist_id, [it.track_id]);
+    const l = grouped.get(it.playlist_id);
+    if (l) l.push(it);
+    else grouped.set(it.playlist_id, [it]);
   }
+  const byList = new Map([...grouped].map(([id, l]) => [id, playableIds(l)]));
   const toMin = (t: string | null) => (t ? Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5)) : null);
   const lists = (playlists ?? []).map((p) => ({
     id: p.id as string,

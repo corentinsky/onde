@@ -263,3 +263,4 @@ export function expandDay(spot: RecurringSpot, dayStart: number): SpotRequest[] 
 
 export * from './player';
 export * from './music';
+export * from './rotation';

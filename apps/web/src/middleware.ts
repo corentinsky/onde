@@ -7,7 +7,7 @@ const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? '';
 export async function middleware(request: NextRequest) {
   if (!url || !key) return NextResponse.next();
   const p = request.nextUrl.pathname;
-  if (p.startsWith('/api/emitter') || p.startsWith('/emetteur/')) return NextResponse.next();
+  if (p.startsWith('/api/emitter') || p.startsWith('/api/cron/') || p.startsWith('/emetteur/')) return NextResponse.next();
 
   let response = NextResponse.next({ request });
   const supabase = createServerClient(url, key, {
