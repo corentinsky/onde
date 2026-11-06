@@ -28,7 +28,7 @@ export default async function Emetteur({ searchParams }: { searchParams: Promise
   const h = await headers();
   const base = `${h.get('x-forwarded-proto') ?? 'https'}://${h.get('host')}`;
   const [{ data: emitters }, { data: streams }, { data: orgs }, { data: ambiences }] = await Promise.all([
-    sb.from('emitters').select('id, name, public_url, last_seen_at, created_at').order('created_at', { ascending: false }),
+    sb.from('emitters').select('id, name, public_url, last_seen_at, created_at, serves_library').order('created_at', { ascending: false }),
     sb.from('streams').select('org_id, mount, enabled, default_ambience_id'),
     sb.from('organizations').select('id, name').order('name'),
     sb.from('ambiences').select('id, org_id, name').order('name')
@@ -72,6 +72,14 @@ export default async function Emetteur({ searchParams }: { searchParams: Promise
           </span>
         </div>
         {live && <p className="sub">Adresse des flux : <strong>{live.public_url}</strong></p>}
+        {live && (live.serves_library ? (
+          <p className="sub">Bibliothèque musicale : rangée sur ce serveur. Les nouveaux titres y sont déposés directement, sans limite de stockage Supabase.</p>
+        ) : (
+          <p className="sub">
+            Pour ranger la bibliothèque musicale sur ce serveur, mettez l’émetteur à jour : connectez-vous au serveur (<code>ssh root@adresse-ip</code>) et lancez{' '}
+            <code>curl -fsSL {base}/emetteur/install.sh | sh</code>
+          </p>
+        ))}
         {waiting && (
           <p className="sub">
             Le certificat HTTPS arrive en une à deux minutes après l’installation. S’il tarde, ouvrez les ports 80 et 443 dans le pare-feu de l’hébergeur.
@@ -154,6 +162,9 @@ export default async function Emetteur({ searchParams }: { searchParams: Promise
         </ol>
         <p className="small muted" style={{ marginBottom: 18 }}>
           Pour un essai sur un Mac : installez <a href="https://www.docker.com/products/docker-desktop/" target="_blank" rel="noreferrer">Docker Desktop</a> et collez la même commande dans le Terminal. Les flux ne s’écoutent alors que sur ce Mac.
+        </p>
+        <p className="small muted" style={{ marginBottom: 18 }}>
+          Mise à jour d’un émetteur déjà installé : sur le serveur, lancez <code>curl -fsSL {base}/emetteur/install.sh | sh</code>. La clé est reprise, les titres et les certificats sont conservés.
         </p>
         <CreateKey base={base} />
       </section>

@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
+import { removeTrackFile } from '@/lib/library';
 import { isConfigured, supabaseServer } from '@/lib/supabase/server';
 
 const str = (f: FormData, k: string) => String(f.get(k) ?? '').trim();
@@ -57,10 +58,10 @@ export async function updateTrack(form: FormData) {
 export async function deleteTrack(form: FormData) {
   const id = str(form, 'id');
   const sb = await db();
-  const { data } = await sb.from('tracks').select('storage_path').eq('id', id).single();
+  const { data } = await sb.from('tracks').select('storage_path, location').eq('id', id).single();
   const { error } = await sb.from('tracks').delete().eq('id', id);
   if (error) throw error;
-  if (data?.storage_path) await sb.storage.from('music').remove([data.storage_path]);
+  if (data?.storage_path) await removeTrackFile(sb, data as { storage_path: string; location: string });
   done('/regie/bibliotheque');
 }
 

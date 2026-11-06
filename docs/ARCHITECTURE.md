@@ -81,6 +81,12 @@ Caddy sert les flux en HTTPS (certificat Let’s Encrypt de l’adresse IP, ou d
 annonce à Onde la première adresse HTTPS valide. Les lecteurs ne reçoivent qu’une adresse qu’un navigateur
 peut lire depuis une page HTTPS (`playableAddress`).
 
+**Bibliothèque sur l’émetteur** (`tracks.location = 'emitter'`) : la régie dépose les titres directement sur le serveur
+de l’émetteur qui l’annonce (`emitters.serves_library`), avec un lien signé `PUT /titres/<fichier>` valable 30 min ;
+lecteurs, régie et autres émetteurs lisent avec un lien signé `GET` (`lib/library.ts`). Signature :
+`md5(<expiration><méthode><chemin> <empreinte de la clé>)`, vérifiée par nginx (`secure_link`). L’émetteur qui garde
+un titre le lit sur son disque (`onde:<fichier>|local`). Les titres déjà dans Supabase y restent.
+
 ## Spots magasin par magasin, sur un flux commun
 
 1. Le lecteur lit le flux par `fetch` (métadonnées ICY) et le joue via MediaSource avec **8 s de marge** :

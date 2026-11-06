@@ -16,7 +16,10 @@ export async function GET(req: NextRequest) {
   if (auth instanceof NextResponse) return auth;
   const sb = supabaseService();
   const publicUrl = req.nextUrl.searchParams.get('public_url');
-  if (publicUrl && /^https?:\/\/[^\s]+$/.test(publicUrl)) await sb.from('emitters').update({ public_url: publicUrl.slice(0, 300) }).eq('id', auth.id);
+  // L’émetteur annonce son adresse publique et s’il garde la bibliothèque musicale (dépôts sur son disque).
+  const patch: Record<string, unknown> = { serves_library: req.nextUrl.searchParams.get('bibliotheque') === '1' };
+  if (publicUrl && /^https?:\/\/[^\s]+$/.test(publicUrl)) patch.public_url = publicUrl.slice(0, 300);
+  await sb.from('emitters').update(patch).eq('id', auth.id);
   try {
     const streams = await ensureStreams(sb);
     const lines = streams.map((s) => `${s.org_id} ${s.mount} ${s.name.replace(/\s+/g, ' ')}`);

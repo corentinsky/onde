@@ -59,8 +59,10 @@ insert into public.organizations (name, slug) values ('Nom de l’enseigne', 'no
 
 1. **Bibliothèque** : déposez les morceaux dans Régie → Bibliothèque. Onde les analyse (volume, début,
    fin, enchaînement) et les range dans les listes. Les fichiers lourds (WAV, FLAC, MP3 à plus de 200 kb/s)
-   sont compressés en MP3 192 kb/s dans le navigateur avant l’envoi : environ 5,5 Mo par titre de 4 min,
-   donc 100 titres tiennent dans le stockage gratuit de Supabase (1 Go), avec de la marge.
+   sont compressés en MP3 192 kb/s dans le navigateur avant l’envoi : environ 5,5 Mo par titre de 4 min.
+   Dès qu’un émetteur est installé sur un serveur, les titres y sont rangés directement (place et trafic du serveur,
+   des milliers de titres sur 60 Go) ; sans émetteur, ils vont dans le stockage gratuit de Supabase (1 Go, environ
+   180 titres).
 2. **Émetteur** (le flux de chaque enseigne) : Régie → Émetteur → Créer une clé, puis coller la commande
    affichée. Détails : [infra/emetteur](../infra/emetteur/README.md).
    - **Serveur** (production) : un VPS Linux sous Ubuntu 24.04, 1 cœur et 2 Go suffisent. Se connecter avec

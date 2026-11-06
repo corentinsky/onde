@@ -45,6 +45,15 @@ démarrent, puis redémarrent tout seuls avec Docker.
 | `PUBLIC_URL` | Adresse des flux imposée (désactive le HTTPS automatique) | `http://localhost:8000` sur Mac |
 | `ONDE_LOCAL=1` | Sur Linux : installation locale, sans HTTPS | — |
 
+**Bibliothèque musicale** : l’émetteur garde aussi les titres déposés depuis la régie (volume Docker
+`bibliotheque`, dossier `/var/lib/onde/bibliotheque`). La régie envoie chaque fichier directement au serveur, les
+lecteurs et la régie le lisent depuis le serveur : place et trafic ne dépendent plus du stockage Supabase. Chaque accès
+passe par un lien signé par Onde qui expire (`/titres/<fichier>?s=…&e=…`, module `secure_link` de nginx) ; le secret
+est l’empreinte SHA-256 de la clé de l’émetteur, que la régie garde à la place de la clé.
+
+**Mise à jour** (même serveur) : `curl -fsSL https://onde-rust.vercel.app/emetteur/install.sh | sh`, sans clé :
+elle est reprise de `~/onde-emetteur/.env`. Titres, cache et certificats sont conservés.
+
 **Titres en cache** : chaque titre est téléchargé une seule fois et gardé sur le disque (volume Docker `titres`) ;
 ceux qui ne passent plus depuis 30 jours sont effacés. Une bibliothèque de 100 titres occupe environ 600 Mo.
 

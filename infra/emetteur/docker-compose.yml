@@ -14,6 +14,9 @@ services:
     volumes:
       # Titres gardés sur le disque : téléchargés une fois, conservés entre les redémarrages.
       - titres:/var/cache/onde
+      # Bibliothèque musicale déposée depuis la régie (conservée tant que les titres existent).
+      - bibliotheque:/var/lib/onde/bibliotheque
 
 volumes:
   titres:
+  bibliotheque:

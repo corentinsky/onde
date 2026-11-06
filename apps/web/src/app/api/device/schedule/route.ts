@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { localTimeIn } from '@onde/rules';
 import { allRows, chunks, inChunks } from '@/lib/batch';
 import { authDevice, storeStream } from '@/lib/device';
+import { trackUrls } from '@/lib/library';
 import { ondeStreamUrl } from '@/lib/stream';
 import { supabaseService } from '@/lib/supabase/server';
 
@@ -111,13 +112,11 @@ async function musicFor(sb: ReturnType<typeof supabaseService>, orgId: string, s
   const rows = await inChunks(ids, (c) =>
     sb
       .from('tracks')
-      .select('id, storage_path, title, artist, isrc, duration_sec, cue_in, cue_out, cross_start, fade_in, fade_out, integrated_lufs, peak_dbfs')
+      .select('id, storage_path, location, title, artist, isrc, duration_sec, cue_in, cue_out, cross_start, fade_in, fade_out, integrated_lufs, peak_dbfs')
       .in('id', c)
       .eq('enabled', true)
   );
-  const paths = rows.map((r) => r.storage_path as string);
-  const signed = (await Promise.all(chunks(paths, 500).map((c) => sb.storage.from('music').createSignedUrls(c, 60 * 60 * 24)))).flatMap((r) => r.data ?? []);
-  const urlOf = new Map(signed.map((s) => [s.path, s.signedUrl]));
+  const urlOf = await trackUrls(sb, rows as { storage_path: string; location: string }[], 60 * 60 * 24);
   const n = (v: unknown) => (v == null ? null : Number(v));
   const tracks = rows.map((r) => ({
     id: r.id,

@@ -1,6 +1,7 @@
 #!/bin/sh
 # Installe et démarre l’émetteur Onde.
 #   curl -fsSL https://onde-rust.vercel.app/emetteur/install.sh | ONDE_CLE=… sh
+# Mise à jour (même serveur) : la même commande sans ONDE_CLE.
 #
 # Sur un Mac : Docker Desktop requis, flux sur http://localhost:8000 (test).
 # Sur un serveur Linux (Ubuntu, Debian) : installe Docker si besoin et sert les flux en HTTPS,
@@ -10,6 +11,13 @@ set -e
 BASE="${ONDE_URL:-https://onde-rust.vercel.app}"
 DIR="${ONDE_DOSSIER:-$HOME/onde-emetteur}"
 
+# Mise à jour d’un émetteur déjà installé : la clé est reprise de l’installation précédente.
+if [ -z "$ONDE_CLE" ] && [ -f "$DIR/.env" ]; then
+  ONDE_CLE="$(sed -n 's/^ONDE_CLE=//p' "$DIR/.env" | head -n 1)"
+  [ -n "$ONDE_URL" ] || BASE="$(sed -n 's/^ONDE_URL=//p' "$DIR/.env" | head -n 1)"
+  BASE="${BASE:-https://onde-rust.vercel.app}"
+  echo "Mise à jour de l’émetteur installé dans $DIR."
+fi
 if [ -z "$ONDE_CLE" ]; then
   echo "Il manque la clé de l’émetteur (Régie → Émetteur → Créer une clé)."; exit 1
 fi

@@ -1,10 +1,12 @@
 import 'server-only';
 import { allRows, chunks, inChunks } from './batch';
+import { trackUrl } from './library';
 import { isConfigured, supabaseServer } from './supabase/server';
 
 export interface Track {
   id: string;
   storage_path: string;
+  location: string;
   file_name: string;
   title: string;
   artist: string;
@@ -71,7 +73,7 @@ export interface DaypartRow {
 }
 
 const TRACK_COLS =
-  'id,storage_path,file_name,title,artist,album,genre,isrc,year,duration_sec,integrated_lufs,loudness_range_lu,peak_dbfs,cue_in,cue_out,cross_start,fade_in,fade_out,manual_cues,warnings,enabled,created_at';
+  'id,storage_path,location,file_name,title,artist,album,genre,isrc,year,duration_sec,integrated_lufs,loudness_range_lu,peak_dbfs,cue_in,cue_out,cross_start,fade_in,fade_out,manual_cues,warnings,enabled,created_at';
 const num = <T extends object>(r: T): T => {
   const o = { ...r } as Record<string, unknown>;
   for (const k of ['duration_sec', 'integrated_lufs', 'loudness_range_lu', 'peak_dbfs', 'cue_in', 'cue_out', 'cross_start', 'fade_in', 'fade_out', 'crossfade_sec', 'target_lufs'])
@@ -128,8 +130,8 @@ export async function getTrack(id: string): Promise<{ track: Track; url: string 
   const { data, error } = await sb.from('tracks').select(`${TRACK_COLS},waveform`).eq('id', id).maybeSingle();
   if (error) throw error;
   if (!data) return null;
-  const { data: signed } = await sb.storage.from('music').createSignedUrl(data.storage_path as string, 60 * 60);
-  return { track: num(data) as Track, url: signed?.signedUrl ?? null };
+  const url = await trackUrl(sb, { storage_path: data.storage_path as string, location: data.location as string }, 60 * 60);
+  return { track: num(data) as Track, url };
 }
 
 export async function listAmbiences(orgId: string): Promise<Ambience[]> {

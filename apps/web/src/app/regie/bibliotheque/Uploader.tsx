@@ -9,6 +9,7 @@ import { useRef, useState } from 'react';
 import { analyze, gainFor, type Analysis } from '@onde/audio';
 import { browserClient, browserConfigured } from '@/lib/supabase/browser';
 import { keepAsIs, toMp3 } from './toMp3';
+import { discardUpload, prepareUpload } from './library-actions';
 
 interface Item {
   name: string;
@@ -98,13 +99,22 @@ export function Uploader({ playlists }: { playlists: { id: string; label: string
         }
         update(i, { status: 'uploading', message: undefined, result: { title: meta.title, artist: meta.artist, a } });
         const sb = browserClient();
-        const path = `${crypto.randomUUID()}.${ext}`;
-        const up = await sb.storage.from('music').upload(path, body, { contentType: body === file ? file.type || 'audio/mpeg' : 'audio/mpeg', upsert: false });
-        if (up.error) throw new Error(up.error.message);
+        const contentType = body === file ? file.type || 'audio/mpeg' : 'audio/mpeg';
+        // Sur le serveur de l’émetteur quand il garde la bibliothèque, sinon dans le stockage Supabase.
+        const target = await prepareUpload(ext);
+        const path = target.path;
+        if (target.kind === 'emitter') {
+          const res = await fetch(target.url, { method: 'PUT', body, headers: { 'Content-Type': contentType } }).catch(() => null);
+          if (!res?.ok) throw new Error(res ? `Le serveur a refusé le fichier (${res.status})` : 'Serveur de l’émetteur injoignable');
+        } else {
+          const up = await sb.storage.from('music').upload(path, body, { contentType, upsert: false });
+          if (up.error) throw new Error(up.error.message);
+        }
         const { data: row, error } = await sb
           .from('tracks')
           .insert({
             storage_path: path,
+            location: target.kind,
             file_name: file.name,
             title: meta.title,
             artist: meta.artist,
@@ -130,7 +140,8 @@ export function Uploader({ playlists }: { playlists: { id: string; label: string
           .select('id')
           .single();
         if (error) {
-          await sb.storage.from('music').remove([path]);
+          if (target.kind === 'emitter') await discardUpload(path).catch(() => undefined);
+          else await sb.storage.from('music').remove([path]);
           throw new Error(error.message);
         }
         if (list) {

@@ -3,6 +3,7 @@ import { effectiveMix, gainFor, type CrossfadeMode } from '@onde/audio';
 import { ambienceAt, emptyRotation, localTimeIn, nextTrack, type Playlist, type PlayedTrack, type RotationState } from '@onde/rules';
 import { allRows, chunks, inChunks } from './batch';
 import type { supabaseService } from './supabase/server';
+import { trackUrl } from './library';
 
 type SB = ReturnType<typeof supabaseService>;
 
@@ -107,7 +108,7 @@ export async function nextForStream(sb: SB, orgId: string): Promise<string | nul
   const rows = await inChunks([...new Set(items.map((i) => i.track_id))], (ids) =>
     sb
       .from('tracks')
-      .select('id, storage_path, title, artist, isrc, cue_in, cue_out, cross_start, fade_in, fade_out, integrated_lufs, peak_dbfs')
+      .select('id, storage_path, location, title, artist, isrc, cue_in, cue_out, cross_start, fade_in, fade_out, integrated_lufs, peak_dbfs')
       .in('id', ids)
       .eq('enabled', true)
   );
@@ -178,7 +179,7 @@ export async function nextForStream(sb: SB, orgId: string): Promise<string | nul
     const cross = Math.max(0, Math.min(30, mix.cueOut - mix.crossStart));
     const gain = t.integrated_lufs == null ? 0 : gainFor(Number(t.integrated_lufs), Number(t.peak_dbfs ?? -1), Number(amb.target_lufs));
 
-    const [{ data: play, error }, { data: signed }] = await Promise.all([
+    const [{ data: play, error }, fileUrl] = await Promise.all([
       sb
         .from('stream_plays')
         .insert({
@@ -195,10 +196,12 @@ export async function nextForStream(sb: SB, orgId: string): Promise<string | nul
         })
         .select('id')
         .single(),
-      sb.storage.from('music').createSignedUrl(t.storage_path as string, 60 * 60 * 3)
+      trackUrl(sb, { storage_path: t.storage_path as string, location: t.location as string }, 60 * 60 * 3)
     ]);
     if (error) throw error;
-    if (!signed?.signedUrl) return null;
+    // Titre rangé sur le serveur de l’émetteur : il le lit sur son disque (« local ») ; sinon lien signé.
+    const source = fileUrl ?? (t.location === 'emitter' ? 'local' : null);
+    if (!source) return null;
     await sb.from('streams').update({ rotation_state: state }).eq('org_id', orgId);
 
     const meta: [string, string][] = [
@@ -212,7 +215,7 @@ export async function nextForStream(sb: SB, orgId: string): Promise<string | nul
       ['liq_fade_out', n2(Math.max(0.01, cross))],
       ['liq_amplify', `${n2(gain)} dB`]
     ];
-    return `annotate:${meta.map(([k, v]) => `${k}="${v}"`).join(',')}:onde:${cacheName(t.storage_path as string, t.id as string)}|${signed.signedUrl}`;
+    return `annotate:${meta.map(([k, v]) => `${k}="${v}"`).join(',')}:onde:${cacheName(t.storage_path as string, t.id as string)}|${source}`;
   }
   return null;
 }

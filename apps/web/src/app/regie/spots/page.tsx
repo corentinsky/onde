@@ -1,5 +1,6 @@
 import { getSession, listSpots, listStoreStatus } from '@/lib/data';
 import { frequency, period, spotState, plural } from '@/lib/format';
+import { trackUrls } from '@/lib/library';
 import { isConfigured, supabaseServer } from '@/lib/supabase/server';
 import { listVoices, voiceConfigured } from '@/lib/voice';
 import { createSpot, setSpotStatus, startEmergency, stopEmergency, toggleHqSpots } from '../actions';
@@ -11,10 +12,9 @@ async function audioLinks(paths: string[]) {
   const sb = await supabaseServer();
   const [{ data: signed }, { data: tracks }] = await Promise.all([
     paths.length ? sb.storage.from('spots').createSignedUrls(paths, 3600) : Promise.resolve({ data: [] as { path: string | null; signedUrl: string }[] }),
-    sb.from('tracks').select('id, title, artist, storage_path').eq('enabled', true).order('title').limit(40)
+    sb.from('tracks').select('id, title, artist, storage_path, location').eq('enabled', true).order('title').limit(40)
   ]);
-  const { data: bedUrls } = tracks?.length ? await sb.storage.from('music').createSignedUrls(tracks.map((t) => t.storage_path as string), 3600) : { data: [] };
-  const bedUrl = new Map((bedUrls ?? []).map((u) => [u.path, u.signedUrl]));
+  const bedUrl = await trackUrls(sb, (tracks ?? []) as { storage_path: string; location: string }[], 3600);
   return {
     spotUrl: new Map((signed ?? []).filter((u) => u.path).map((u) => [u.path as string, u.signedUrl])),
     beds: (tracks ?? [])

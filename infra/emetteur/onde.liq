@@ -6,6 +6,7 @@
 #   ONDE_CLE     clé de l’émetteur, créée dans Régie → Émetteur
 #   PUBLIC_URL   adresse publique des flux, ex. http://localhost:8000
 #   ONDE_CACHE   dossier des titres gardés sur le disque (défaut /var/cache/onde)
+#   ONDE_BIBLIOTHEQUE  dossier de la bibliothèque déposée par la régie (défaut /var/lib/onde/bibliotheque)
 #   ICECAST_PASSWORD  mot de passe interne Icecast (généré au démarrage)
 
 settings.init.allow_root.set(true)
@@ -24,6 +25,8 @@ auth = [("Authorization", "Bearer #{cle}"), ("User-Agent", "Onde-Emetteur/1.0")]
 # « onde:<fichier>|<lien signé> » : <fichier> est le nom du titre dans la bibliothèque (identifiant + extension).
 # Les titres qui ne passent plus depuis 30 jours sont effacés par le démarrage (entrypoint.sh).
 cache_dir = environment.get(default="/var/cache/onde", "ONDE_CACHE")
+# Bibliothèque déposée sur ce serveur par la régie : lue directement sur le disque.
+library_dir = environment.get(default="/var/lib/onde/bibliotheque", "ONDE_BIBLIOTHEQUE")
 
 def onde_protocol(~rlog, ~maxtime, arg) =
   parts = string.split(separator="\\|", arg)
@@ -33,8 +36,14 @@ def onde_protocol(~rlog, ~maxtime, arg) =
     rlog("Adresse de titre invalide.")
     []
   else
+    here = "#{library_dir}/#{key}"
     path = "#{cache_dir}/#{key}"
-    if file.exists(path) and file.size(path) > 0 then
+    if file.exists(here) and file.size(here) > 0 then
+      [here]
+    elsif not string.contains(prefix="http", uri) then
+      rlog("Titre absent de ce serveur : #{key}")
+      []
+    elsif file.exists(path) and file.size(path) > 0 then
       # Date d’utilisation : le ménage ne retire que les titres qui ne passent plus.
       ignore(process.run("touch -c #{process.quote(path)}"))
       [path]
@@ -76,7 +85,7 @@ end
 
 # Liste des flux à diffuser : « version <empreinte> » puis « <enseigne> <point de montage> <nom> ».
 def read_config() =
-  r = http.get(headers=auth, timeout=20., "#{onde}/api/emitter/config?public_url=#{url.encode(public_address())}")
+  r = http.get(headers=auth, timeout=20., "#{onde}/api/emitter/config?bibliotheque=1&public_url=#{url.encode(public_address())}")
   if r.status_code == 200 then
     r
   else
