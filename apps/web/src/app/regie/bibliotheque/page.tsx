@@ -4,12 +4,13 @@ import { gainFor } from '@onde/audio';
 import { getSession } from '@/lib/data';
 import { PAGE_SIZE, libraryStats, listAmbiences, listPlaylists, listTracks, mmss, warningLabel } from '@/lib/music';
 import { isConfigured } from '@/lib/supabase/server';
+import { SelectionBar } from './SelectionBar';
 import { Uploader } from './Uploader';
 
 export const metadata = { title: 'Bibliothèque' };
 
-export default async function Bibliotheque({ searchParams }: { searchParams: Promise<{ q?: string; filtre?: string; page?: string }> }) {
-  const { q = '', filtre, page: pageParam } = await searchParams;
+export default async function Bibliotheque({ searchParams }: { searchParams: Promise<{ q?: string; filtre?: string; page?: string; ajoutes?: string; liste?: string }> }) {
+  const { q = '', filtre, page: pageParam, ajoutes, liste } = await searchParams;
   const { org } = await getSession();
   if (!org) return null;
   const page = Math.max(0, (Number(pageParam) || 1) - 1);
@@ -25,6 +26,7 @@ export default async function Bibliotheque({ searchParams }: { searchParams: Pro
   const inPlaylists = new Map<string, string[]>();
   for (const p of playlists) for (const t of p.track_ids) inPlaylists.set(t, [...(inPlaylists.get(t) ?? []), `${ambName.get(p.ambience_id) ?? ''} · ${p.name}`]);
   const totalMin = Math.round(stats.usefulSec / 60);
+  const listOptions = playlists.map((p) => ({ id: p.id, label: `${ambName.get(p.ambience_id) ?? ''} · ${p.name}` }));
 
   return (
     <>
@@ -37,7 +39,7 @@ export default async function Bibliotheque({ searchParams }: { searchParams: Pro
       </div>
 
       {!isConfigured && <div className="notice">Mode démo : les morceaux sont analysés mais pas enregistrés.</div>}
-      <Uploader playlists={playlists.map((p) => ({ id: p.id, label: `${ambName.get(p.ambience_id) ?? ''} · ${p.name}` }))} />
+      <Uploader playlists={listOptions} />
 
       <section className="card">
         <div className="page-head" style={{ alignItems: 'center' }}>
@@ -53,15 +55,22 @@ export default async function Bibliotheque({ searchParams }: { searchParams: Pro
             </div>
           </div>
         </div>
+        {ajoutes && (
+          <p className="tag" role="status" style={{ marginBottom: 12 }}>
+            {Number(ajoutes) > 1 ? `${ajoutes} titres ajoutés` : '1 titre ajouté'}{liste ? ` à « ${liste} »` : ''} (déjà présents : ignorés)
+          </p>
+        )}
+        <SelectionBar lists={listOptions} shown={shown.length} total={total} q={q} filtre={filtre ?? ''} />
         <div className="table-wrap">
           <table className="table">
             <thead>
-              <tr><th>Titre</th><th>Durée utile</th><th>Volume</th><th>Gain</th><th>Points de mix</th><th>Listes</th><th>État</th></tr>
+              <tr><th style={{ width: 32 }}><span className="visually-hidden">Choisir</span></th><th>Titre</th><th>Durée utile</th><th>Volume</th><th>Gain</th><th>Points de mix</th><th>Listes</th><th>État</th></tr>
             </thead>
             <tbody>
-              {shown.length === 0 && <tr><td colSpan={7} className="empty">{q ? 'Aucun titre ne correspond.' : filtre === 'verifier' ? 'Rien à vérifier.' : 'Aucun titre pour l’instant. Déposez vos premiers morceaux ci-dessus.'}</td></tr>}
+              {shown.length === 0 && <tr><td colSpan={8} className="empty">{q ? 'Aucun titre ne correspond.' : filtre === 'verifier' ? 'Rien à vérifier.' : 'Aucun titre pour l’instant. Déposez vos premiers morceaux ci-dessus.'}</td></tr>}
               {shown.map((t) => (
                 <tr key={t.id}>
+                  <td><input type="checkbox" form="selection" name="track_id" value={t.id} aria-label={`Choisir ${t.title || t.file_name}`} /></td>
                   <td>
                     <Link href={`/regie/bibliotheque/${t.id}`} style={{ fontWeight: 500 }}>{t.title || t.file_name}</Link>
                     <div className="small muted">{t.artist || 'Artiste inconnu'}{t.album ? ` · ${t.album}` : ''}</div>

@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { removeTrackFile } from '@/lib/library';
+import { listTracks } from '@/lib/music';
 import { rotatePlaylist } from '@/lib/rotation';
 import { isConfigured, supabaseServer } from '@/lib/supabase/server';
 
@@ -165,6 +166,37 @@ export async function addToPlaylist(form: FormData) {
   const { error } = await sb.from('playlist_tracks').upsert(ids.map((track_id) => ({ playlist_id: playlistId, track_id, position: pos++ })), { onConflict: 'playlist_id,track_id', ignoreDuplicates: true });
   if (error) throw error;
   done(`/regie/ambiances/listes/${playlistId}`);
+}
+
+/** Bibliothèque : titres cochés (ou tous les résultats de la recherche) ajoutés à une liste. */
+export async function addTracksToList(form: FormData) {
+  const playlistId = str(form, 'playlist_id');
+  const q = str(form, 'q');
+  const filtre = str(form, 'filtre');
+  const back = (extra: Record<string, string>) =>
+    done(`/regie/bibliotheque?${new URLSearchParams({ ...(q ? { q } : {}), ...(filtre ? { filtre } : {}), ...extra })}`);
+  if (!playlistId) back({});
+  const sb = await db();
+  let ids = form.getAll('track_id').map(String).filter(Boolean);
+  if (form.get('all') === '1') {
+    ids = [];
+    for (let page = 0; ; page++) {
+      const { rows, total } = await listTracks({ q, warningsOnly: filtre === 'verifier', page, size: 1000 });
+      ids.push(...rows.map((t) => t.id));
+      if (ids.length >= total || rows.length === 0) break;
+    }
+  }
+  if (!ids.length) back({});
+  const { data: list } = await sb.from('playlists').select('name, ambiences(name)').eq('id', playlistId).single();
+  const { data: last } = await sb.from('playlist_tracks').select('position').eq('playlist_id', playlistId).order('position', { ascending: false }).limit(1).maybeSingle();
+  let pos = (last?.position ?? 0) + 1;
+  for (let i = 0; i < ids.length; i += 500) {
+    const part = ids.slice(i, i + 500);
+    const { error } = await sb.from('playlist_tracks').upsert(part.map((track_id) => ({ playlist_id: playlistId, track_id, position: pos++ })), { onConflict: 'playlist_id,track_id', ignoreDuplicates: true });
+    if (error) throw error;
+  }
+  const amb = (list?.ambiences as unknown as { name: string } | null)?.name;
+  back({ ajoutes: String(ids.length), liste: `${amb ? `${amb} · ` : ''}${list?.name ?? ''}` });
 }
 
 export async function removeFromPlaylist(form: FormData) {
