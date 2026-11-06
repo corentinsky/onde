@@ -128,19 +128,6 @@ def stream(line) =
   # Enchaînement au point de chevauchement : liq_cross_duration, liq_fade_in, liq_fade_out.
   s = crossfade(id="enchainement_#{mount}", duration=8., fade_in=0.1, fade_out=2., minimum=0., s)
 
-  # Voix posées sur l’intro (a cappella) : jouées par-dessus le début du titre, la musique baisse
-  # de 10 dB dessous puis remonte en douceur. Onde choisit la voix et le moment (métadonnées onde_overlay).
-  voices = request.queue(id="voix_#{mount}", interactive=false)
-  voice = amplify(override="liq_amplify", 1., voices)
-  duck = ref(1.)
-  thread.run.recurrent(fun () ->
-    begin
-      target = if voices.is_ready() then 0.32 else 1. end
-      duck := duck() + (target - duck()) * 0.25
-      0.04
-    end
-  )
-
   # Titre réellement lancé : Onde met à jour « en cours » et l’historique.
   # (Les enchaînements ne marquent pas de fin de piste : on suit les métadonnées.)
   last_play = ref("")
@@ -152,20 +139,9 @@ def stream(line) =
         thread.run(fun () ->
           ignore(http.post(headers=auth, timeout=10., "#{onde}/api/emitter/started?play=#{play}"))
         )
-        overlay = m["onde_overlay"]
-        if overlay != "" then
-          gain = m["onde_overlay_gain"]
-          delay = float_of_string(default=0.3, m["onde_overlay_delay"])
-          thread.run(delay=delay, fun () ->
-            voices.push.uri("annotate:liq_amplify=\"#{gain} dB\":onde:#{overlay}")
-          )
-        end
       end
     end
   )
-  # (override=null : sinon le volume liq_amplify du titre remplacerait la baisse.)
-  s = amplify(override=null(), {duck()}, s)
-  s = add(normalize=false, [s, source.drop.metadata(voice)])
 
   # Silence plutôt qu’une coupure si la régie ne répond pas : le lecteur prend alors le relais.
   s = mksafe(s)

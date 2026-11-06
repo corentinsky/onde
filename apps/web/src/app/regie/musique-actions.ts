@@ -107,9 +107,7 @@ export async function createPlaylist(form: FormData) {
 
 export async function savePlaylist(form: FormData) {
   const id = str(form, 'id');
-  const isOverlay = form.get('is_overlay') === 'on';
-  // Une liste de voix posées se règle toujours en « tous les X titres ».
-  const type = isOverlay ? 'once_per_songs' : str(form, 'type');
+  const type = str(form, 'type');
   const days = form.getAll('days').map(Number).filter((d) => d >= 1 && d <= 7);
   const sb = await db();
   const { error } = await sb
@@ -128,8 +126,7 @@ export async function savePlaylist(form: FormData) {
       start_date: str(form, 'start_date') || null,
       end_date: str(form, 'end_date') || null,
       avoid_duplicates: form.get('avoid_duplicates') === 'on',
-      is_jingle: isOverlay ? false : form.get('is_jingle') === 'on',
-      is_overlay: isOverlay,
+      is_jingle: form.get('is_jingle') === 'on',
       enabled: form.get('enabled') === 'on',
       rotation_days: str(form, 'rotation_days') ? clamp(Math.round(numOr(form, 'rotation_days', 15)!), 1, 365) : null,
       rotation_share: clamp(Math.round(numOr(form, 'rotation_share', 20)!), 5, 60),

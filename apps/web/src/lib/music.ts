@@ -59,7 +59,6 @@ export interface PlaylistRow {
   end_date: string | null;
   avoid_duplicates: boolean;
   is_jingle: boolean;
-  is_overlay: boolean;
   enabled: boolean;
   track_ids: string[];
   /** Titres au repos (rotation automatique) : date de retour. */
