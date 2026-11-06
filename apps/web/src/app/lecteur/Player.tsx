@@ -13,7 +13,7 @@ import { StreamDirector, type OndePlay, type StreamTrack } from './StreamDirecto
 import { streamSupported } from './StreamPlayer';
 import './player.css';
 
-const VERSION = '0.4.1-web';
+const VERSION = '0.4.2-web';
 const keys = (p: string) => ({
   token: `${p}token`,
   schedule: `${p}schedule`,
@@ -94,6 +94,7 @@ export function Player({ demo }: { demo: boolean }) {
   const [pairError, setPairError] = useState('');
   const [schedule, setSchedule] = useState<Schedule | null>(null);
   const [started, setStarted] = useState(false);
+  const [wasStopped, setWasStopped] = useState(false);
   const [online, setOnline] = useState(true);
   const [np, setNp] = useState<NP | null>(null);
   const [onAir, setOnAir] = useState<{ title: string; origin: string } | null>(null);
@@ -104,6 +105,9 @@ export function Player({ demo }: { demo: boolean }) {
   const [source, setSource] = useState<'flux' | 'secours' | 'bibliotheque' | 'externe' | null>(null);
 
   const music = useRef<HTMLAudioElement | null>(null);
+  /** Spot en cours de lecture, et arrêt demandé : coupent un écran de spots en route. */
+  const spotEl = useRef<HTMLAudioElement | null>(null);
+  const halted = useRef(false);
   const engine = useRef<MusicEngine | null>(null);
   const director = useRef<StreamDirector | null>(null);
   const handing = useRef(false);
@@ -290,8 +294,10 @@ export function Player({ demo }: { demo: boolean }) {
   const playFile = (url: string) =>
     new Promise<void>((resolve, reject) => {
       const a = new Audio(url);
+      spotEl.current = a;
       a.volume = baseVolume();
       a.onended = () => resolve();
+      a.onpause = () => resolve(); // arrêt de la diffusion pendant le spot
       a.onerror = () => reject(new Error('audio'));
       a.play().catch(reject);
     });
@@ -304,6 +310,7 @@ export function Player({ demo }: { demo: boolean }) {
     const duck = s?.rules?.duck_music !== false;
     if (!between) await duckTo(duck ? 0.15 : 0, duck ? 800 : 300);
     for (const it of items) {
+      if (halted.current) break;
       const spot = s?.spots.find((x) => x.id === it.request.spotId);
       setOnAir({ title: it.request.title, origin: it.request.origin });
       let status: Log['status'] = 'played';
@@ -323,7 +330,7 @@ export function Player({ demo }: { demo: boolean }) {
       await sleep(400);
     }
     setOnAir(null);
-    if (!between) await duckTo(1);
+    if (!between && !halted.current) await duckTo(1);
     busy.current = false;
   }, []);
 
@@ -558,7 +565,35 @@ export function Player({ demo }: { demo: boolean }) {
     };
   }, [started]);
 
+  /** Arrêt : musique, flux et spots coupés ; « Reprendre » relance tout depuis le début. */
+  const stop = () => {
+    halted.current = true;
+    if (typeof speechSynthesis !== 'undefined') speechSynthesis.cancel();
+    spotEl.current?.pause();
+    engine.current?.stop();
+    engine.current = null;
+    director.current?.stop();
+    director.current = null;
+    handing.current = false;
+    const a = music.current;
+    if (a) {
+      a.pause();
+      a.removeAttribute('src');
+      a.load();
+    }
+    busy.current = false;
+    setNp(null);
+    setOnAir(null);
+    setNext(null);
+    setSource(null);
+    setSoundBlocked(false);
+    setWasStopped(true);
+    setStarted(false);
+    if (document.fullscreenElement) document.exitFullscreen?.().catch(() => undefined);
+  };
+
   const start = async () => {
+    halted.current = false;
     startedAt.current = Date.now();
     const onde = schedule?.stream?.kind === 'onde' && schedule.stream.url && streamSupported() ? schedule.stream.url : null;
     if (!demo && schedule && onde) {
@@ -629,6 +664,12 @@ export function Player({ demo }: { demo: boolean }) {
           {demo && <span className="lp-chip">Démo</span>}
           <span className="lp-chip"><span className="lp-dot" style={{ background: online ? '#34c759' : '#ff9f0a' }} />{online ? 'Connecté' : 'Hors ligne, programme en mémoire'}</span>
           <span className="lp-chip">{hhmm(clock)}</span>
+          {started && (
+            <button className="lp-chip lp-chip-btn" onClick={stop} aria-label="Arrêter la diffusion">
+              <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><rect width="10" height="10" rx="2" fill="currentColor" /></svg>
+              Arrêter
+            </button>
+          )}
         </div>
       </header>
 
@@ -638,8 +679,12 @@ export function Player({ demo }: { demo: boolean }) {
       {!started ? (
         <div className="lp-center lp-grow">
           {schedule?.org?.logo && <span className="lp-logo lp-logo-big"><img src={schedule.org.logo} alt={schedule.org.name ? `Logo ${schedule.org.name}` : 'Logo'} /></span>}
-          <button className="lp-btn lp-start" onClick={start}>Démarrer la diffusion</button>
-          <p className="lp-hint">Le navigateur exige un geste pour lancer le son. À faire une fois à l’ouverture.</p>
+          <button className="lp-btn lp-start" onClick={start}>{wasStopped ? 'Reprendre la diffusion' : 'Démarrer la diffusion'}</button>
+          <p className="lp-hint">
+            {wasStopped
+              ? 'Diffusion arrêtée : ni musique ni spots dans la boutique.'
+              : 'Le navigateur exige un geste pour lancer le son. À faire une fois à l’ouverture.'}
+          </p>
         </div>
       ) : (
         <main className="lp-grow lp-main">
