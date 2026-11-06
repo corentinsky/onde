@@ -75,6 +75,9 @@ export function Sidebar({ orgs, orgId, pending, userName, role }: Props) {
               </option>
             ))}
           </select>
+          {orgs.find((o) => o.id === orgId)?.logo && (
+            <img className="org-logo" src={orgs.find((o) => o.id === orgId)!.logo!} alt={`Logo ${orgs.find((o) => o.id === orgId)!.name}`} />
+          )}
           <noscript>
             <button className="btn btn-secondary btn-small" type="submit">
               Changer

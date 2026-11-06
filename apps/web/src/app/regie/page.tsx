@@ -3,6 +3,7 @@ import { getSession, listIncidents, listSpots, listStoreStatus } from '@/lib/dat
 import { ago, incidentLabel, spotState, plural } from '@/lib/format';
 import { EMITTER_ONLINE_MS, playableAddress } from '@/lib/stream';
 import { isConfigured, supabaseService } from '@/lib/supabase/server';
+import { LogoForm } from './LogoForm';
 
 export const metadata = { title: 'Vue d’ensemble' };
 
@@ -27,7 +28,8 @@ async function antenne(orgId: string) {
   };
 }
 
-export default async function Overview() {
+export default async function Overview({ searchParams }: { searchParams: Promise<{ logo?: string }> }) {
+  const { logo: logoSaved } = await searchParams;
   const { org } = await getSession();
   if (!org) return null;
   const [stores, incidents, pending, spots, air] = await Promise.all([
@@ -47,7 +49,10 @@ export default async function Overview() {
           <div className="eyebrow">{org.name} · {plural(stores.length, 'boutique')}</div>
           <h1>Vue d’ensemble</h1>
         </div>
-        <Link className="btn btn-primary" href="/regie/spots#nouveau">Nouveau spot national</Link>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          {logoSaved && <span className="tag" role="status">Logo enregistré</span>}
+          <Link className="btn btn-primary" href="/regie/spots#nouveau">Nouveau spot national</Link>
+        </div>
       </div>
 
       <div className="kpis">
@@ -121,6 +126,11 @@ export default async function Overview() {
           </div>
         </section>
       </div>
+      <section className="card">
+        <h2>Logo de l’enseigne</h2>
+        <p className="sub">Affiché dans la régie et sur l’écran des lecteurs des boutiques. Le fond blanc est retiré et l’image recadrée automatiquement.</p>
+        <LogoForm key={org.logo ?? 'aucun'} orgId={org.id} orgName={org.name} logo={org.logo ?? null} />
+      </section>
     </>
   );
 }

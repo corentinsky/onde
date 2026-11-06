@@ -17,7 +17,7 @@ export async function GET(req: NextRequest) {
 
   const [{ data: rules }, { data: org }, { data: store }, { data: targets }, { data: zones }] = await Promise.all([
     sb.from('broadcast_rules').select('*').eq('org_id', ctx.orgId).single(),
-    sb.from('organizations').select('hq_spots_enabled, emergency').eq('id', ctx.orgId).single(),
+    sb.from('organizations').select('name, logo, hq_spots_enabled, emergency').eq('id', ctx.orgId).single(),
     sb.from('stores').select('id, name, timezone, opening_hours, max_volume').eq('id', ctx.storeId).single(),
     sb
       .from('spot_targets')

@@ -11,6 +11,7 @@ export interface Org {
   name: string;
   slug: string;
   hq_spots_enabled: boolean;
+  logo?: string | null;
   emergency?: { id: string; kind: string; text: string; started_at: string } | null;
 }
 
@@ -111,7 +112,7 @@ export async function getSession(): Promise<Session> {
   if (!user) return { mode: 'live', userName: '', userEmail: '', isPlatformAdmin: false, orgs: [], org: null };
   const [{ data: profile }, { data: orgs }] = await Promise.all([
     sb.from('profiles').select('full_name,is_platform_admin').eq('id', user.id).maybeSingle(),
-    sb.from('organizations').select('id,name,slug,hq_spots_enabled,emergency').order('name')
+    sb.from('organizations').select('id,name,slug,hq_spots_enabled,emergency,logo').order('name')
   ]);
   const list = (orgs ?? []) as Org[];
   return {

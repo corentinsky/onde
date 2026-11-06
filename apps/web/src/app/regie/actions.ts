@@ -20,6 +20,17 @@ const num = (f: FormData, k: string, min: number, max: number) => {
   return Math.min(max, Math.max(min, Math.round(n)));
 };
 
+/** Logo de l’enseigne (PNG préparé dans le navigateur) ; vide = retiré. */
+export async function saveLogo(form: FormData) {
+  const orgId = str(form, 'org_id');
+  const logo = str(form, 'logo');
+  if (logo && (!/^data:image\/(png|webp|jpeg);base64,[A-Za-z0-9+/=]+$/.test(logo) || logo.length > 300_000)) throw new Error('Logo invalide');
+  const sb = await supabaseServer();
+  const { error } = await sb.from('organizations').update({ logo: logo || null }).eq('id', orgId);
+  if (error) throw error;
+  back('/regie?logo=1');
+}
+
 export async function selectOrg(form: FormData) {
   const id = str(form, 'org');
   (await cookies()).set(ORG_COOKIE, id, { path: '/', sameSite: 'lax', httpOnly: true, maxAge: 60 * 60 * 24 * 365 });

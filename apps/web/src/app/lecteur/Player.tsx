@@ -30,7 +30,7 @@ type Spot = ScheduleSpot & { script?: string; audio_url?: string | null };
 interface Schedule {
   store: { name: string; max_volume?: number; timezone?: string | null } | null;
   rules: Parameters<typeof toRules>[0] & { duck_music?: boolean };
-  org: { hq_spots_enabled: boolean; emergency: Emergency | null } | null;
+  org: { name?: string; logo?: string | null; hq_spots_enabled: boolean; emergency: Emergency | null } | null;
   stream: { name: string; url: string | null; kind?: 'onde' | 'external' } | null;
   spots: Spot[];
   music?: MusicSchedule | null;
@@ -617,7 +617,14 @@ export function Player({ demo }: { demo: boolean }) {
     <div className="lp">
       <audio ref={music} onError={onMusicError} onStalled={onMusicError} preload="none" />
       <header className="lp-top">
-        <div className="lp-brand">Onde · {schedule?.store?.name ?? 'Boutique'}</div>
+        {schedule?.org?.logo ? (
+          <div className="lp-brand">
+            <span className="lp-logo"><img src={schedule.org.logo} alt={schedule.org.name ? `Logo ${schedule.org.name}` : 'Logo'} /></span>
+            {schedule?.store?.name ?? 'Boutique'}
+          </div>
+        ) : (
+          <div className="lp-brand">Onde · {schedule?.store?.name ?? 'Boutique'}</div>
+        )}
         <div className="lp-chips">
           {demo && <span className="lp-chip">Démo</span>}
           <span className="lp-chip"><span className="lp-dot" style={{ background: online ? '#34c759' : '#ff9f0a' }} />{online ? 'Connecté' : 'Hors ligne, programme en mémoire'}</span>
@@ -630,6 +637,7 @@ export function Player({ demo }: { demo: boolean }) {
       )}
       {!started ? (
         <div className="lp-center lp-grow">
+          {schedule?.org?.logo && <span className="lp-logo lp-logo-big"><img src={schedule.org.logo} alt={schedule.org.name ? `Logo ${schedule.org.name}` : 'Logo'} /></span>}
           <button className="lp-btn lp-start" onClick={start}>Démarrer la diffusion</button>
           <p className="lp-hint">Le navigateur exige un geste pour lancer le son. À faire une fois à l’ouverture.</p>
         </div>
