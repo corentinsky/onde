@@ -1,6 +1,6 @@
 import 'server-only';
 import { effectiveMix, gainFor, type CrossfadeMode } from '@onde/audio';
-import { ambienceAt, emptyRotation, localTimeIn, nextTrack, type Playlist, type PlayedTrack, type RotationState } from '@onde/rules';
+import { ambienceAt, emptyRotation, localTimeIn, nextTrack, overlayDue, pickOverlay, scheduleActive, type Playlist, type PlayedTrack, type RotationState } from '@onde/rules';
 import { allRows, chunks, inChunks } from './batch';
 import type { supabaseService } from './supabase/server';
 import { trackUrl } from './library';
@@ -137,17 +137,19 @@ export async function nextForStream(sb: SB, orgId: string): Promise<string | nul
     schedule: { startMin: toMin(p.start_time), endMin: toMin(p.end_time), days: p.days, startDate: p.start_date, endDate: p.end_date },
     avoidDuplicates: p.avoid_duplicates as boolean,
     isJingle: p.is_jingle as boolean,
+    isOverlay: Boolean(p.is_overlay),
     enabled: true,
     trackIds: byList.get(p.id as string) ?? []
-  })) as (Playlist & { ambienceId: string })[];
+  })) as (Playlist & { ambienceId: string; isOverlay: boolean })[];
   const metas = new Map(rows.map((t) => [t.id as string, { id: t.id as string, title: t.title as string, artist: t.artist as string }]));
 
   const { data: hist } = await sb
     .from('stream_plays')
-    .select('track_id, playlist_id, title, artist, is_jingle, queued_at, started_at')
+    .select('track_id, playlist_id, title, artist, is_jingle, queued_at, started_at, overlay_track_id')
     .eq('org_id', orgId)
     .order('queued_at', { ascending: false })
     .limit(300);
+  const overlayHistory = (hist ?? []).map((h) => ({ isJingle: h.is_jingle as boolean, overlayId: h.overlay_track_id as string | null })).reverse();
   const history: PlayedTrack[] = (hist ?? [])
     .reverse()
     .map((h) => ({ trackId: (h.track_id as string) ?? '', playlistId: h.playlist_id as string | null, at: Date.parse((h.started_at ?? h.queued_at) as string), title: h.title as string, artist: h.artist as string, isJingle: h.is_jingle as boolean }));
@@ -165,7 +167,7 @@ export async function nextForStream(sb: SB, orgId: string): Promise<string | nul
     const choice = nextTrack({
       now: startAt,
       local,
-      playlists: lists.filter((p) => p.ambienceId === id),
+      playlists: lists.filter((p) => p.ambienceId === id && !p.isOverlay),
       tracks: metas,
       history,
       state,
@@ -182,6 +184,27 @@ export async function nextForStream(sb: SB, orgId: string): Promise<string | nul
     const cross = Math.max(0, Math.min(30, mix.cueOut - mix.crossStart));
     const gain = t.integrated_lufs == null ? 0 : gainFor(Number(t.integrated_lufs), Number(t.peak_dbfs ?? -1), Number(amb.target_lufs));
 
+    // Voix posée sur l’intro : liste « voix » de l’ambiance, active à cette heure, dont le tour est venu.
+    let overlay: { id: string; key: string; source: string; gain: number; delay: number } | null = null;
+    if (!choice.playlist.isJingle) {
+      const voices = lists.find((p) => p.ambienceId === id && p.isOverlay && p.trackIds.length > 0 && scheduleActive(p.schedule, local) && overlayDue(p.everySongs, overlayHistory));
+      const vid = voices ? pickOverlay(voices.trackIds, overlayHistory) : null;
+      const v = vid ? trackById.get(vid) : undefined;
+      if (v) {
+        const vUrl = await trackUrl(sb, { storage_path: v.storage_path as string, location: v.location as string }, 60 * 60 * 3);
+        const vSource = vUrl ?? (v.location === 'emitter' ? 'local' : null);
+        // Départ juste après le chevauchement avec le titre précédent, quand le titre est seul.
+        if (vSource)
+          overlay = {
+            id: v.id as string,
+            key: cacheName(v.storage_path as string, v.id as string),
+            source: vSource,
+            gain: v.integrated_lufs == null ? 0 : gainFor(Number(v.integrated_lufs), Number(v.peak_dbfs ?? -1), Number(amb.target_lufs)),
+            delay: Math.min(6, Number(last?.cross_sec ?? 0)) + 0.3
+          };
+      }
+    }
+
     const [{ data: play, error }, fileUrl] = await Promise.all([
       sb
         .from('stream_plays')
@@ -195,7 +218,8 @@ export async function nextForStream(sb: SB, orgId: string): Promise<string | nul
           isrc: t.isrc,
           is_jingle: Boolean(choice.playlist.isJingle),
           duration_sec: Math.round((mix.cueOut - mix.cueIn) * 100) / 100,
-          cross_sec: Math.round(cross * 100) / 100
+          cross_sec: Math.round(cross * 100) / 100,
+          overlay_track_id: overlay?.id ?? null
         })
         .select('id')
         .single(),
@@ -216,7 +240,14 @@ export async function nextForStream(sb: SB, orgId: string): Promise<string | nul
       ['liq_cross_duration', n2(cross)],
       ['liq_fade_in', n2(Math.max(0.01, mix.fadeIn))],
       ['liq_fade_out', n2(Math.max(0.01, cross))],
-      ['liq_amplify', `${n2(gain)} dB`]
+      ['liq_amplify', `${n2(gain)} dB`],
+      ...(overlay
+        ? ([
+            ['onde_overlay', `${overlay.key}|${overlay.source}`],
+            ['onde_overlay_gain', n2(overlay.gain)],
+            ['onde_overlay_delay', n2(overlay.delay)]
+          ] as [string, string][])
+        : [])
     ];
     return `annotate:${meta.map(([k, v]) => `${k}="${v}"`).join(',')}:onde:${cacheName(t.storage_path as string, t.id as string)}|${source}`;
   }
