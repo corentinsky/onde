@@ -34,9 +34,41 @@ function fromFileName(name: string) {
   return m ? { artist: m[1].trim(), title: m[2].trim() } : { artist: '', title: base.trim() };
 }
 
+const AUDIO = /\.(mp3|wav|flac|m4a|aac|ogg|opus|aif|aiff)$/i;
+/** Fichiers audio seulement (un dossier contient souvent des pochettes et des fichiers cachés), par ordre de chemin. */
+const audioOnly = (files: File[]) =>
+  files
+    .filter((f) => AUDIO.test(f.name) && !f.name.startsWith('.'))
+    .sort((a, b) => (a.webkitRelativePath || a.name).localeCompare(b.webkitRelativePath || b.name, 'fr', { numeric: true }));
+
+/** Fichiers déposés, dossiers parcourus en profondeur. */
+async function droppedAudio(dt: DataTransfer): Promise<File[]> {
+  const entries = Array.from(dt.items ?? [])
+    .map((it) => (it.kind === 'file' ? it.webkitGetAsEntry?.() : null))
+    .filter((e): e is FileSystemEntry => !!e);
+  if (!entries.length) return audioOnly(Array.from(dt.files));
+  const out: File[] = [];
+  const walk = async (entry: FileSystemEntry): Promise<void> => {
+    if (entry.isFile) {
+      out.push(await new Promise<File>((resolve, reject) => (entry as FileSystemFileEntry).file(resolve, reject)));
+      return;
+    }
+    const reader = (entry as FileSystemDirectoryEntry).createReader();
+    // readEntries rend les fichiers par paquets : on relit jusqu’à une réponse vide.
+    for (;;) {
+      const batch = await new Promise<FileSystemEntry[]>((resolve, reject) => reader.readEntries(resolve, reject));
+      if (!batch.length) break;
+      for (const e of batch) await walk(e);
+    }
+  };
+  for (const e of entries) await walk(e);
+  return audioOnly(out);
+}
+
 export function Uploader({ playlists }: { playlists: { id: string; label: string }[] }) {
   const router = useRouter();
   const input = useRef<HTMLInputElement>(null);
+  const folder = useRef<HTMLInputElement>(null);
   const [items, setItems] = useState<Item[]>([]);
   const [over, setOver] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -166,16 +198,17 @@ export function Uploader({ playlists }: { playlists: { id: string; label: string
       <div
         onDragOver={(e) => { e.preventDefault(); setOver(true); }}
         onDragLeave={() => setOver(false)}
-        onDrop={(e) => { e.preventDefault(); setOver(false); process(Array.from(e.dataTransfer.files)); }}
+        onDrop={async (e) => { e.preventDefault(); setOver(false); process(await droppedAudio(e.dataTransfer)); }}
         style={{ border: `1.5px dashed ${over ? 'var(--accent)' : 'var(--line-strong)'}`, background: over ? '#eef5ff' : 'var(--surface-2)', borderRadius: 18, padding: '28px 24px', textAlign: 'center' }}
       >
-        <div style={{ fontSize: 18, fontWeight: 600 }}>Déposez vos morceaux</div>
+        <div style={{ fontSize: 18, fontWeight: 600 }}>Déposez vos morceaux ou un dossier</div>
         <p className="sub" style={{ margin: '6px auto 16px', maxWidth: 560 }}>
           MP3, WAV, FLAC, M4A. Chaque titre est analysé dans votre navigateur : volume (EBU R128), crête, début et fin audibles, point de chevauchement.
           Les fichiers lourds sont compressés en MP3 192 kb/s avant l’envoi.
         </p>
         <div className="actions" style={{ justifyContent: 'center', alignItems: 'center' }}>
           <button className="btn btn-primary" type="button" disabled={busy} onClick={() => input.current?.click()}>Choisir des fichiers</button>
+          <button className="btn btn-secondary" type="button" disabled={busy} onClick={() => folder.current?.click()}>Choisir un dossier</button>
           {playlists.length > 0 && (
             <select className="select" style={{ width: 'auto' }} value={target} onChange={(e) => setTarget(e.target.value)} aria-label="Ajouter à une liste">
               <option value="">Sans liste pour l’instant</option>
@@ -184,6 +217,18 @@ export function Uploader({ playlists }: { playlists: { id: string; label: string
           )}
         </div>
         <input ref={input} type="file" accept="audio/*,.mp3,.wav,.flac,.m4a,.aac,.ogg" multiple hidden onChange={(e) => { process(Array.from(e.target.files ?? [])); e.target.value = ''; }} />
+        {/* Dossier entier, sous-dossiers compris : seuls les fichiers audio sont gardés. */}
+        <input
+          ref={(el) => {
+            folder.current = el;
+            el?.setAttribute('webkitdirectory', '');
+            el?.setAttribute('directory', '');
+          }}
+          type="file"
+          multiple
+          hidden
+          onChange={(e) => { process(audioOnly(Array.from(e.target.files ?? []))); e.target.value = ''; }}
+        />
       </div>
       {items.length > 0 && (
         <div className="table-wrap">
