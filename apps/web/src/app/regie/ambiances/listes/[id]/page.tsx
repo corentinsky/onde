@@ -48,7 +48,8 @@ export default async function PlaylistPage({ params, searchParams }: { params: P
   const candidates = library.rows.filter((t) => !inSet.has(t.id));
 
   // Aperçu : les 12 prochains titres de l’ambiance, avec toutes ses listes, à partir de maintenant.
-  const sameAmb = sameAmbRows.map(toEngine);
+  // Les voix posées ne passent pas seules : elles se superposent aux titres.
+  const sameAmb = sameAmbRows.filter((x) => !x.is_overlay).map(toEngine);
   const tracks = new Map(ambTracks.filter((t) => t.enabled).map((t) => [t.id, { id: t.id, title: t.title, artist: t.artist }]));
   const preview = previewQueue({
     playlists: sameAmb,
@@ -132,6 +133,7 @@ export default async function PlaylistPage({ params, searchParams }: { params: P
           {[
             ['avoid_duplicates', 'Éviter les doublons', 'Respecte les espacements titre et artiste de l’ambiance.', p.avoid_duplicates],
             ['is_jingle', 'Jingle', 'Ne compte pas comme un titre et n’apparaît pas dans les métadonnées.', p.is_jingle],
+            ['is_overlay', 'Voix posée sur l’intro', 'A cappella ou voix courte jouée par-dessus le début du titre, la musique baisse dessous. Réglez « Tous les X titres ». Sur le flux de l’enseigne.', p.is_overlay],
             ['enabled', 'Liste active', 'Désactivée, elle ne passe plus.', p.enabled]
           ].map(([name, label, help, checked]) => (
             <div className="switch-row" key={name as string}>

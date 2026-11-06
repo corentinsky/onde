@@ -135,3 +135,13 @@ au moins reste en rotation (règles pures et testées : `packages/rules/src/rota
 sont ni diffusés par l’émetteur ni proposés aux lecteurs. Historique : `playlist_rotations`, affiché sur la fiche
 de la liste, avec un bouton « Renouveler maintenant ». Avec `CRON_SECRET` défini sur Vercel, seul Vercel peut
 lancer la tâche ; sans lui, un appel extérieur ne fait que les rotations déjà dues.
+
+
+## Voix posées sur l’intro (a cappella)
+
+Une liste marquée « Voix posée sur l’intro » (`playlists.is_overlay`, type « tous les X titres ») ne passe pas
+entre deux titres : tous les X titres, Onde choisit une de ses voix (`overlayDue`, `pickOverlay` dans
+`packages/rules/src/overlay.ts`, en évitant les plus récentes) et l’annonce avec le titre suivant
+(`onde_overlay`, `onde_overlay_gain`, `onde_overlay_delay`). L’émetteur la mixe par-dessus le début du titre,
+juste après le chevauchement avec le précédent, et baisse la musique de 10 dB dessous, en douceur (`onde.liq`).
+Historique : `stream_plays.overlay_track_id`. Les lecteurs en musique de secours (sans flux) ne posent pas de voix.

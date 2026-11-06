@@ -67,7 +67,7 @@ async function musicFor(sb: ReturnType<typeof supabaseService>, orgId: string, s
   const [{ data: ambiences }, { data: dayparts }, { data: playlists }, { data: zone }] = await Promise.all([
     sb.from('ambiences').select('id, name, crossfade_mode, crossfade_sec, target_lufs, title_separation_min, artist_separation_min').eq('org_id', orgId).order('name'),
     sb.from('dayparts').select('id, name, ambience_id, start_time, end_time, days, position').eq('org_id', orgId).order('position').order('start_time'),
-    sb.from('playlists').select('*').eq('org_id', orgId).eq('enabled', true),
+    sb.from('playlists').select('*').eq('org_id', orgId).eq('enabled', true).eq('is_overlay', false),
     sb.from('zones').select('ambience_id').eq('store_id', storeId).not('ambience_id', 'is', null).limit(1).maybeSingle()
   ]);
   if (!ambiences?.length) return null;
